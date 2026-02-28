@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 TIMEZONE = "Asia/Taipei"
 TW_TZ = timezone(timedelta(hours=8))
 
-# 工作室營業設定（之後可調整）
-WORK_HOURS_START = 10  # 早上 10 點
-WORK_HOURS_END = 18    # 下午 6 點
+# 工作室營業設定
+WORK_HOURS_START = 13  # 下午 1 點
+WORK_HOURS_END = 21    # 晚上 9 點
 SLOT_DURATION = 60     # 每個時段 60 分鐘
+CLOSED_WEEKDAYS = {0, 6}  # 0=週一, 6=週日 不營業
 
 WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -43,21 +44,23 @@ def _get_calendar_service():
         return None
 
 
-def get_next_available_dates(days: int = 7) -> list:
-    """回傳未來 N 天中可預約的日期（跳過週日）。"""
+def get_next_available_dates(days: int = 9) -> list:
+    """回傳未來可預約的日期（跳過週一和週日），最多 6 個。"""
     today = datetime.now(TW_TZ).date()
     dates = []
     for i in range(1, days + 1):
         d = today + timedelta(days=i)
-        if d.weekday() != 6:  # 週日不營業
+        if d.weekday() not in CLOSED_WEEKDAYS:
             dates.append(d.strftime("%Y-%m-%d"))
+        if len(dates) >= 6:
+            break
     return dates
 
 
 def get_available_slots(date_str: str) -> list:
     """
     查詢指定日期的可用時段。
-    回傳: ["10:00", "11:00", "14:00", ...]
+    回傳: ["13:00", "14:00", "15:00", ...]
     """
     service = _get_calendar_service()
     settings = get_settings()
@@ -74,7 +77,7 @@ def get_available_slots(date_str: str) -> list:
             hour=WORK_HOURS_END, minute=0, second=0, tzinfo=TW_TZ
         )
 
-        # FreeBusy 查詢
+        # FreeBusy 查詢（會自動避開你行事曆上有事的時段）
         body = {
             "timeMin": day_start.isoformat(),
             "timeMax": day_end.isoformat(),
@@ -148,7 +151,7 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
 
 
 def format_date_label(date_str: str) -> str:
-    """格式化日期，例如 '3/2（一）'。"""
+    """格式化日期，例如 '3/2（二）'。"""
     d = datetime.strptime(date_str, "%Y-%m-%d")
     weekday = WEEKDAY_NAMES[d.weekday()]
     return f"{d.month}/{d.day}（{weekday}）"
