@@ -1,10 +1,9 @@
 """
-LINE Webhook 路由。
+LINE Webhook 路由 — Step 2: 關鍵字路由 + Flex Message + AI 助理。
 
-職責：
-1. 接收 LINE Platform 發來的 HTTP POST
-2. 用 channel_secret 驗證 X-Line-Signature（防偽造）
-3. 解析事件並分發給對應 handler
+訊息處理流程：
+[第一層] 關鍵字比對 → 固定回應（0 Token）
+[第二層] AI 助理 → Gemini（花 Token，但已過濾 80% 的問題）
 """
 
 import logging
@@ -18,6 +17,8 @@ from linebot.v3.messaging import (
     Configuration,
     ReplyMessageRequest,
     TextMessage,
+    FlexMessage,
+    FlexContainer,
 )
 from linebot.v3.webhooks import (
     MessageEvent,
@@ -26,18 +27,18 @@ from linebot.v3.webhooks import (
 )
 
 from app.config import get_settings
+from app.services.keyword_router import match_keyword
+from app.services.ai_service import ask_ai
+from app.services.notify_service import notify_admin
+from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # --- 初始化 LINE SDK ---
 settings = get_settings()
-
 handler = WebhookHandler(settings.line_channel_secret)
-
-configuration = Configuration(
-    access_token=settings.line_channel_access_token,
-)
+configuration = Configuration(access_token=settings.line_channel_access_token)
 
 
 # ============================================================
@@ -45,22 +46,74 @@ configuration = Configuration(
 # ============================================================
 @router.post("/callback")
 async def callback(request: Request):
-    """
-    LINE Platform 會把所有事件 POST 到這裡。
-    第一件事就是驗證簽名，不合法直接 400。
-    """
     signature = request.headers.get("X-Line-Signature", "")
     body = (await request.body()).decode("utf-8")
-
-    logger.info("Received webhook - body length: %d", len(body))
 
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        logger.warning("Invalid signature rejected")
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     return "OK"
+
+
+# ============================================================
+# 回覆輔助函式
+# ============================================================
+def reply_text(event, text: str):
+    """回覆純文字訊息。"""
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=text)],
+            )
+        )
+
+
+def reply_flex(event, flex_dict: dict):
+    """回覆 Flex Message 卡片。"""
+    with ApiClient(configuration) as api_client:
+        MessagingApi(api_client).reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[
+                    FlexMessage(
+                        alt_text=flex_dict["altText"],
+                        contents=FlexContainer.from_dict(flex_dict["contents"]),
+                    )
+                ],
+            )
+        )
+
+
+# ============================================================
+# 意圖 → 回應 對照表
+# ============================================================
+INTENT_HANDLERS = {
+    # --- 主要動作 ---
+    "booking": lambda event, text: reply_flex(event, fm.booking_card()),
+    "services": lambda event, text: reply_flex(event, fm.service_menu()),
+
+    # --- 價格防禦 ---
+    "pricing": lambda event, text: reply_text(
+        event,
+        "費用會依每個人的狀況和需求不同，老師會在諮詢時跟您說明。\n\n"
+        "想了解更多，可以輸入「服務項目」看看我們提供的服務，"
+        "或直接輸入「我要預約」開始預約諮詢。"
+    ),
+
+    # --- 諮詢說明 ---
+    "what_is_consultation": lambda event, text: reply_flex(event, fm.consultation_card()),
+    "category_consultation": lambda event, text: reply_flex(event, fm.consultation_card()),
+
+    # --- 服務分類 ---
+    "category_fortune": lambda event, text: reply_flex(event, fm.fortune_card()),
+    "category_wealth": lambda event, text: reply_flex(event, fm.wealth_card()),
+    "category_love": lambda event, text: reply_flex(event, fm.love_card()),
+    "category_fengshui": lambda event, text: reply_flex(event, fm.fengshui_card()),
+    "category_custom": lambda event, text: reply_flex(event, fm.custom_card()),
+}
 
 
 # ============================================================
@@ -68,40 +121,55 @@ async def callback(request: Request):
 # ============================================================
 @handler.add(FollowEvent)
 def handle_follow(event: FollowEvent):
-    """用戶加好友 / 解封鎖時觸發。"""
+    """用戶加好友時觸發。"""
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
 
-        welcome_text = (
+        welcome = (
             "歡迎來到「百無禁忌」。\n\n"
-            "我是你的玄學諮詢助理，有任何命理、風水、擇日的問題，都可以直接問我。\n\n"
-            "想預約深度諮詢？輸入「我要預約」即可開始。"
+            "我是工作室的助理，有任何問題都可以問我。\n\n"
+            "👉 輸入「服務項目」查看我們的服務\n"
+            "👉 輸入「我要預約」直接預約諮詢\n"
+            "👉 輸入「找小夏老師」由老師親自回覆"
         )
 
         line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
-                messages=[TextMessage(text=welcome_text)],
+                messages=[TextMessage(text=welcome)],
             )
         )
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event: MessageEvent):
-    """所有文字訊息的進入點。目前為 Echo 測試模式。"""
-    user_text = event.message.text
+    """所有文字訊息的主路由。"""
+    user_text = event.message.text.strip()
     user_id = event.source.user_id
 
     logger.info("User [%s]: %s", user_id, user_text)
 
-    # --- Echo Mode（確認管線暢通後會換成 AI）---
-    reply = f"[Echo] 收到：{user_text}\n\n（AI 客服尚未上線，這是管線測試）"
+    # === 第一層：關鍵字比對（0 Token）===
+    intent = match_keyword(user_text)
 
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=reply)],
-            )
-        )
+    if intent:
+        # 特殊處理：找小夏老師
+        if intent == "human":
+            reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
+            notify_admin(user_id, user_text, reason="客人要求找小夏老師")
+            return
+
+        # 特殊處理：取得自己的 User ID（管理員設定用）
+        if intent == "get_my_id":
+            reply_text(event, f"你的 LINE User ID：\n{user_id}")
+            return
+
+        # 一般意圖：查表回應
+        handler_func = INTENT_HANDLERS.get(intent)
+        if handler_func:
+            handler_func(event, user_text)
+            return
+
+    # === 第二層：AI 助理（花 Token）===
+    ai_reply = ask_ai(user_text)
+    reply_text(event, ai_reply)
