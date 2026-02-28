@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # 管理員 LINE User ID（用來接收通知）
     admin_line_user_id: str = ""
 
+    # Vercel KV（Bot 開關狀態用）
+    kv_rest_api_url: str = ""
+    kv_rest_api_token: str = ""
+
     model_config = {
         "env_file": ".env" if os.path.exists(".env") else None,
         "env_file_encoding": "utf-8",
