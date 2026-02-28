@@ -11,7 +11,8 @@ LINE Webhook 路由 — Step 4: 預約 + 付款確認三步機制。
   ├── 客人回報匯款：已匯款 → 通知管理員
   ├── 管理員確認收款：/paid → 建立日曆事件 → 通知客人
   └── 其他關鍵字
-[第二層] AI 助理 → Gemini
+[第二層] AI 速率檢查（10 分鐘內最多 5 次）
+[第三層] AI 助理 → Gemini
 """
 
 import re
@@ -44,6 +45,7 @@ from app.services.state_service import (
     has_seen_principles, set_seen_principles,
     save_booking, get_booking, update_booking_status, delete_booking,
     set_admin_context, get_admin_context,
+    is_ai_rate_limited,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -433,6 +435,15 @@ def handle_text_message(event: MessageEvent):
             handler_func(event, user_text)
             return
 
-    # === 第二層：AI 助理（花 Token）===
+    # === 第二層：AI 速率檢查（10 分鐘 5 次上限）===
+    if is_ai_rate_limited(user_id):
+        reply_text(
+            event,
+            "如果需要更多協助，可以輸入「服務項目」了解我們的服務，"
+            "或輸入「找小夏老師」讓老師親自回覆你 🙏"
+        )
+        return
+
+    # === 第三層：AI 助理（花 Token）===
     ai_reply = ask_ai(user_text)
     reply_text(event, ai_reply)

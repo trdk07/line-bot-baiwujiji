@@ -4,6 +4,7 @@
   1. /off /on Bot 開關
   2. 記住用戶是否已看過預約原則說明
   3. 預約狀態管理（per-user，含付款流程）
+  4. AI 對話速率限制（防止 Token 浪費）
 
 預約狀態流程：
   pending → awaiting_payment → payment_reported → (完成刪除)
@@ -107,6 +108,45 @@ def set_seen_principles(user_id: str):
         )
     except Exception:
         pass
+
+
+# ============================================================
+# AI 對話速率限制（防止 Token 浪費）
+# ============================================================
+def is_ai_rate_limited(user_id: str, max_calls: int = 5, window_seconds: int = 600) -> bool:
+    """
+    檢查用戶是否超過 AI 對話限制。
+    每位用戶在 window_seconds（預設 10 分鐘）內最多 max_calls（預設 5）次 AI 回覆。
+    超過後回傳 True，不再呼叫 AI。
+    """
+    url = _get_kv_url()
+    if not url:
+        return False
+
+    key = f"ai_rate:{user_id}"
+    try:
+        # 計數 +1
+        resp = httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["INCR", key],
+            timeout=3.0,
+        )
+        count = resp.json().get("result", 0)
+
+        # 第一次呼叫時設定自動過期
+        if count == 1:
+            httpx.post(
+                url,
+                headers=_get_kv_headers(),
+                json=["EXPIRE", key, window_seconds],
+                timeout=3.0,
+            )
+
+        return count > max_calls
+
+    except Exception:
+        return False
 
 
 # ============================================================
