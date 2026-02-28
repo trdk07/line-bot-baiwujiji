@@ -3,12 +3,16 @@ LINE Flex Message 模板 — 所有互動卡片的定義。
 這些全部是固定內容，不花 AI Token。
 """
 
+from datetime import datetime
+
 # === 色彩定義 ===
 BG_DARK = "#1B1B1B"
 GOLD = "#C9A962"
 TEXT_WHITE = "#FFFFFF"
 TEXT_GREY = "#AAAAAA"
 DIVIDER = "#333333"
+
+WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
 
 def _make_button(label: str, text: str) -> dict:
@@ -265,7 +269,7 @@ def custom_card() -> dict:
 
 
 # ============================================================
-# 預約引導卡片
+# 預約引導卡片（Google Calendar 未設定時的備用）
 # ============================================================
 def booking_card() -> dict:
     return {
@@ -290,6 +294,99 @@ def booking_card() -> dict:
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("直接在對話框中輸入即可，例如：", color=TEXT_GREY),
                     _make_text("王小明\n1990/05/15\n最近工作不順，想了解事業方向", color=TEXT_GREY),
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
+# 日期選擇卡片（預約 Step 1）
+# ============================================================
+def date_picker_card(dates: list) -> dict:
+    """顯示可預約日期讓客人選擇。"""
+    buttons = []
+    for date_str in dates:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        weekday = WEEKDAY_NAMES[d.weekday()]
+        label = f"{d.month}/{d.day}（{weekday}）"
+        buttons.append({
+            "type": "button",
+            "action": {
+                "type": "message",
+                "label": label,
+                "text": f"預約 {date_str}",
+            },
+            "style": "primary",
+            "color": GOLD,
+            "height": "sm",
+            "margin": "sm",
+        })
+
+    return {
+        "type": "flex",
+        "altText": "選擇預約日期",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("選擇預約日期", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("請選擇方便的日期", size="sm", color=TEXT_GREY, align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    *buttons,
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
+# 時段選擇卡片（預約 Step 2）
+# ============================================================
+def time_picker_card(date_str: str, slots: list) -> dict:
+    """顯示指定日期的可用時段讓客人選擇。"""
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    weekday = WEEKDAY_NAMES[d.weekday()]
+    date_label = f"{d.month}/{d.day}（{weekday}）"
+
+    buttons = []
+    for slot in slots:
+        buttons.append({
+            "type": "button",
+            "action": {
+                "type": "message",
+                "label": slot,
+                "text": f"預約 {date_str} {slot}",
+            },
+            "style": "primary",
+            "color": GOLD,
+            "height": "sm",
+            "margin": "sm",
+        })
+
+    return {
+        "type": "flex",
+        "altText": f"選擇 {date_label} 的時段",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("選擇時段", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text(date_label, size="lg", color=TEXT_WHITE, weight="bold", align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    *buttons,
                 ],
             },
         },
