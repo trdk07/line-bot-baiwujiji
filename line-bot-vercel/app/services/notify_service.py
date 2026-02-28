@@ -15,7 +15,18 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def notify_admin(user_id: str, user_message: str, reason: str = "客人要求找老師"):
+def get_user_name(user_id: str, configuration) -> str:
+    """透過 LINE API 取得用戶的顯示名稱。"""
+    try:
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            profile = line_bot_api.get_profile(user_id)
+            return profile.display_name
+    except Exception:
+        return "未知用戶"
+
+
+def notify_admin(user_id: str, user_message: str, reason: str = "客人找你"):
     """
     發送 Push Message 給管理員。
     如果 ADMIN_LINE_USER_ID 未設定，只記錄 log。
@@ -31,17 +42,12 @@ def notify_admin(user_id: str, user_message: str, reason: str = "客人要求找
             access_token=settings.line_channel_access_token,
         )
 
+        user_name = get_user_name(user_id, configuration)
+
+        notification = f"📢 {user_name}：{user_message}"
+
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-
-            notification = (
-                f"📢 {reason}\n"
-                f"——————————\n"
-                f"用戶 ID：{user_id}\n"
-                f"用戶訊息：{user_message}\n"
-                f"——————————\n"
-                f"請到 LINE 官方帳號後台回覆此用戶。"
-            )
 
             line_bot_api.push_message(
                 PushMessageRequest(
@@ -50,7 +56,7 @@ def notify_admin(user_id: str, user_message: str, reason: str = "客人要求找
                 )
             )
 
-            logger.info("Admin notified for user: %s", user_id)
+            logger.info("Admin notified for user: %s (%s)", user_name, user_id)
 
     except Exception as e:
         logger.error("Failed to notify admin: %s", e)
