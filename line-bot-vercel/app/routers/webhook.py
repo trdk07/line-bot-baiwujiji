@@ -5,7 +5,7 @@ LINE Webhook 路由 — Step 3: Google Calendar 預約整合。
 [第零層] 管理員指令（/off /on /myid）
 [      ] Bot 開關檢查 — 關閉時只回靜態訊息
 [第一層] 關鍵字比對 → 固定回應（0 Token）
-  ├── 預約流程：我要預約 → 日期選擇 → 時段選擇 → 建立預約
+  ├── 預約流程：原則說明（首次）→ 日期選擇 → 時段選擇 → 建立預約
   ├── 報到登記
   └── 其他關鍵字
 [第二層] AI 助理 → Gemini（花 Token，但已過濾 80% 的問題）
@@ -36,7 +36,10 @@ from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.ai_service import ask_ai
 from app.services.notify_service import notify_admin, get_user_name
-from app.services.state_service import is_bot_active, set_bot_active
+from app.services.state_service import (
+    is_bot_active, set_bot_active,
+    has_seen_principles, set_seen_principles,
+)
 from app.services.calendar_service import (
     get_next_available_dates,
     get_available_slots,
@@ -211,8 +214,14 @@ def handle_text_message(event: MessageEvent):
 
         # --- 預約流程 ---
 
-        # Step 1：客人說「我要預約」→ 顯示日期選擇
+        # 入口：「我要預約」
         if intent == "booking":
+            # 第一次：顯示原則說明（只出現一次）
+            if not has_seen_principles(user_id):
+                set_seen_principles(user_id)
+                reply_flex(event, fm.principles_card())
+                return
+            # 已看過原則：直接進日期選擇
             if settings.google_service_account_json and settings.google_calendar_id:
                 dates = get_next_available_dates()
                 reply_flex(event, fm.date_picker_card(dates))
@@ -220,7 +229,7 @@ def handle_text_message(event: MessageEvent):
                 reply_flex(event, fm.booking_card())
             return
 
-        # Step 2：客人選了日期 → 查空檔 → 顯示時段選擇
+        # Step 2：客人選了日期 → 查空檔 → 顯示時段
         if intent == "booking_date":
             m = re.search(r"(\d{4}-\d{2}-\d{2})", user_text)
             if m:
@@ -255,8 +264,8 @@ def handle_text_message(event: MessageEvent):
                     f"📅 {date_label} {time_str}\n\n"
                     f"已通知小夏老師，老師確認後會回覆您。\n\n"
                     f"方便的話請先提供：\n"
-                    f"① 您的大名\n"
-                    f"② 出生年月日（國曆）\n"
+                    f"① 您的姓名\n"
+                    f"② 出生年月日（國曆）時間（有最好）\n"
                     f"③ 想了解的問題"
                 )
 
