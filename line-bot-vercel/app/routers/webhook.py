@@ -1,13 +1,17 @@
 """
-LINE Webhook 路由 — Step 2.5: 完整功能版。
+LINE Webhook 路由 — Step 3: Google Calendar 預約整合。
 
 訊息處理流程：
 [第零層] 管理員指令（/off /on /myid）
 [      ] Bot 開關檢查 — 關閉時只回靜態訊息
 [第一層] 關鍵字比對 → 固定回應（0 Token）
+  ├── 預約流程：我要預約 → 日期選擇 → 時段選擇 → 建立預約
+  ├── 報到登記
+  └── 其他關鍵字
 [第二層] AI 助理 → Gemini（花 Token，但已過濾 80% 的問題）
 """
 
+import re
 import logging
 from fastapi import APIRouter, Request, HTTPException
 
@@ -31,8 +35,14 @@ from linebot.v3.webhooks import (
 from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.ai_service import ask_ai
-from app.services.notify_service import notify_admin
+from app.services.notify_service import notify_admin, get_user_name
 from app.services.state_service import is_bot_active, set_bot_active
+from app.services.calendar_service import (
+    get_next_available_dates,
+    get_available_slots,
+    create_event,
+    format_date_label,
+)
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -96,11 +106,10 @@ def is_admin(user_id: str) -> bool:
 
 
 # ============================================================
-# 意圖 → 回應 對照表
+# 意圖 → 回應 對照表（簡單的一對一回應）
 # ============================================================
 INTENT_HANDLERS = {
     # --- 主要動作 ---
-    "booking": lambda event, text: reply_flex(event, fm.booking_card()),
     "services": lambda event, text: reply_flex(event, fm.service_menu()),
 
     # --- 價格防禦 ---
@@ -187,19 +196,76 @@ def handle_text_message(event: MessageEvent):
 
     # === Bot 開關檢查 ===
     if not is_bot_active():
-        # Bot 關閉中，只有管理員指令能通過（上面已處理）
-        # 一般用戶收到靜態訊息
         if not is_admin(user_id):
             reply_text(event, "小夏老師目前在線上，請稍候老師回覆 🙏")
             return
-        # 管理員自己的訊息也不處理（老師正在手動回覆）
 
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
-        # 特殊處理：找小夏老師
+
+        # 找小夏老師
         if intent == "human":
             reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
             notify_admin(user_id, user_text, reason="客人要求找小夏老師")
+            return
+
+        # --- 預約流程 ---
+
+        # Step 1：客人說「我要預約」→ 顯示日期選擇
+        if intent == "booking":
+            if settings.google_service_account_json and settings.google_calendar_id:
+                dates = get_next_available_dates()
+                reply_flex(event, fm.date_picker_card(dates))
+            else:
+                reply_flex(event, fm.booking_card())
+            return
+
+        # Step 2：客人選了日期 → 查空檔 → 顯示時段選擇
+        if intent == "booking_date":
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", user_text)
+            if m:
+                date_str = m.group(1)
+                date_label = format_date_label(date_str)
+                slots = get_available_slots(date_str)
+                if slots:
+                    reply_flex(event, fm.time_picker_card(date_str, slots))
+                else:
+                    reply_text(
+                        event,
+                        f"😅 {date_label} 已經約滿了。\n\n請輸入「我要預約」重新選擇其他日期。"
+                    )
+            return
+
+        # Step 3：客人選了時段 → 建立預約 + 通知老師
+        if intent == "booking_confirm":
+            m = re.search(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", user_text)
+            if m:
+                date_str = m.group(1)
+                time_str = m.group(2)
+                date_label = format_date_label(date_str)
+                user_name = get_user_name(user_id, configuration)
+
+                # 建立 Google Calendar 事件
+                create_event(date_str, time_str, user_name)
+
+                # 回覆客人
+                reply_text(
+                    event,
+                    f"預約完成 ✓\n\n"
+                    f"📅 {date_label} {time_str}\n\n"
+                    f"已通知小夏老師，老師確認後會回覆您。\n\n"
+                    f"方便的話請先提供：\n"
+                    f"① 您的大名\n"
+                    f"② 出生年月日（國曆）\n"
+                    f"③ 想了解的問題"
+                )
+
+                # 通知管理員
+                notify_admin(
+                    user_id,
+                    f"📅 預約 {date_label} {time_str}",
+                    reason="新預約",
+                )
             return
 
         # 一般意圖：查表回應
