@@ -28,6 +28,15 @@ KEYWORD_PATTERNS = [
     (r"^預約\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", "booking_confirm"),
     (r"^預約\s+\d{4}-\d{2}-\d{2}$", "booking_date"),
 
+    # --- 服務分類（放在「服務項目」之前，避免「招財項目」「感情項目」被「項目」搶先匹配）---
+    (r"什麼是諮詢|為什麼要諮詢|諮詢是什麼|為何諮詢|為什麼要先諮詢", "what_is_consultation"),
+    (r"人生困惑|困惑諮詢", "category_consultation"),
+    (r"算命問事|算命|問事", "category_fortune"),
+    (r"招財項目|招財", "category_wealth"),
+    (r"感情項目|感情", "category_love"),
+    (r"風水調整|風水", "category_fengshui"),
+    (r"客製化|疑難雜症|法事", "category_custom"),
+
     # --- 主要動作 ---
     (r"我要預約|預約|想預約|預約諮詢|我想預約", "booking"),
     (r"服務項目|有什麼服務|服務|項目|你們做什麼|能做什麼", "services"),
@@ -35,17 +44,6 @@ KEYWORD_PATTERNS = [
 
     # --- 價格防禦 ---
     (r"多少錢|價格|費用|報價|怎麼收費|收費標準", "pricing"),
-
-    # --- 諮詢說明 ---
-    (r"什麼是諮詢|為什麼要諮詢|諮詢是什麼|為何諮詢|為什麼要先諮詢", "what_is_consultation"),
-    (r"人生困惑|困惑諮詢", "category_consultation"),
-
-    # --- 服務分類 ---
-    (r"算命問事|算命|問事", "category_fortune"),
-    (r"招財項目|招財", "category_wealth"),
-    (r"感情項目|感情", "category_love"),
-    (r"風水調整|風水", "category_fengshui"),
-    (r"客製化|疑難雜症|法事", "category_custom"),
 ]
 
 
