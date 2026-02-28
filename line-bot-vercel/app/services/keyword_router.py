@@ -8,6 +8,16 @@ from typing import Optional
 
 # (正則表達式, 意圖代碼)
 KEYWORD_PATTERNS = [
+    # --- 管理員指令（放最前面，優先比對）---
+    (r"^/off$", "bot_off"),
+    (r"^/on$", "bot_on"),
+    (r"^/myid$", "get_my_id"),
+
+    # --- 報到登記（0 Token）---
+    (r"^我會到$|^會到$|^報到$|^\+1$|^到$|^我到了$|^我要來$", "checkin_yes"),
+    (r"會晚到|晚到|晚一點", "checkin_late"),
+    (r"^pass$|^不到$|^不去$|^請假$|不會到", "checkin_no"),
+
     # --- 主要動作 ---
     (r"我要預約|預約|想預約|預約諮詢|我想預約", "booking"),
     (r"服務項目|有什麼服務|服務|項目|你們做什麼|能做什麼", "services"),
@@ -26,9 +36,6 @@ KEYWORD_PATTERNS = [
     (r"感情項目|感情", "category_love"),
     (r"風水調整|風水", "category_fengshui"),
     (r"客製化|疑難雜症|法事", "category_custom"),
-
-    # --- 工具指令 ---
-    (r"^/myid$", "get_my_id"),
 ]
 
 
@@ -39,6 +46,6 @@ def match_keyword(text: str) -> Optional[str]:
     """
     text = text.strip()
     for pattern, intent in KEYWORD_PATTERNS:
-        if re.search(pattern, text):
+        if re.search(pattern, text, re.IGNORECASE):
             return intent
     return None
