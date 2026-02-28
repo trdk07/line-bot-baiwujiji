@@ -50,7 +50,7 @@ def ask_ai(user_message: str) -> str:
         genai.configure(api_key=settings.gemini_api_key)
 
         model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
+            model_name="gemini-2.0-flash-lite",
             system_instruction=SYSTEM_PROMPT,
             generation_config=genai.GenerationConfig(
                 max_output_tokens=150,
