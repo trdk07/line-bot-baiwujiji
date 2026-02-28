@@ -158,6 +158,12 @@ def wealth_card() -> dict:
                 "paddingAll": "20px",
                 "contents": [
                     _make_text("招財項目", size="xl", color=GOLD, weight="bold"),
+                    _make_text("依個人狀況報價", size="md", color=TEXT_WHITE, weight="bold"),
+                    {"type": "separator", "color": DIVIDER, "margin": "md"},
+                    _make_text(
+                        "財運不順、生意不好、總覺得漏財？老師會針對你的狀況，找出財運卡關的原因，安排最適合的招財方式。",
+                        color=TEXT_GREY,
+                    ),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("✦ 五方貴人招財（個人／公司）", color=TEXT_WHITE),
                     _make_text("✦ 日夜招財（限店面）", color=TEXT_WHITE),
@@ -192,6 +198,12 @@ def love_card() -> dict:
                 "paddingAll": "20px",
                 "contents": [
                     _make_text("感情項目", size="xl", color=GOLD, weight="bold"),
+                    _make_text("依個人狀況報價", size="md", color=TEXT_WHITE, weight="bold"),
+                    {"type": "separator", "color": DIVIDER, "margin": "md"},
+                    _make_text(
+                        "感情的問題往往不只是表面看到的那樣。老師會先了解你們之間的狀況，再針對問題的根源給出最適合的建議和處理方式。",
+                        color=TEXT_GREY,
+                    ),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("✦ 單戀催合", color=TEXT_WHITE),
                     _make_text("✦ 分手挽回", color=TEXT_WHITE),
