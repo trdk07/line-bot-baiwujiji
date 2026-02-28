@@ -1,14 +1,15 @@
 """
-LINE Webhook 路由 — Step 3: Google Calendar 預約整合。
+LINE Webhook 路由 — Step 3: Google Calendar 預約整合 + 管理員確認機制。
 
 訊息處理流程：
-[第零層] 管理員指令（/off /on /myid）
-[      ] Bot 開關檢查 — 關閉時只回靜態訊息
+[第零層] 管理員指令（/off /on /ok /no /myid）
+[      ] Bot 開關檢查
 [第一層] 關鍵字比對 → 固定回應（0 Token）
-  ├── 預約流程：原則說明（首次）→ 日期選擇 → 時段選擇 → 建立預約
-  ├── 報到登記
+  ├── 預約流程：原則說明（首次）→ 日期 → 時段 → 等待確認
+  ├── 管理員確認：/ok 確認預約 → 寫入行事曆 → 通知客人
+  ├── 管理員拒絕：/no 拒絕預約 → 通知客人
   └── 其他關鍵字
-[第二層] AI 助理 → Gemini（花 Token，但已過濾 80% 的問題）
+[第二層] AI 助理 → Gemini
 """
 
 import re
@@ -35,10 +36,11 @@ from linebot.v3.webhooks import (
 from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.ai_service import ask_ai
-from app.services.notify_service import notify_admin, get_user_name
+from app.services.notify_service import notify_admin, get_user_name, push_text_to_user
 from app.services.state_service import (
     is_bot_active, set_bot_active,
     has_seen_principles, set_seen_principles,
+    save_pending_booking, get_pending_booking, delete_pending_booking,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -197,6 +199,50 @@ def handle_text_message(event: MessageEvent):
         reply_text(event, f"你的 LINE User ID：\n{user_id}")
         return
 
+    # --- 管理員確認/拒絕預約 ---
+    if intent == "booking_ok":
+        if is_admin(user_id):
+            booking = get_pending_booking()
+            if booking:
+                date_label = format_date_label(booking["d"])
+                # 寫入 Google Calendar
+                create_event(booking["d"], booking["t"], booking["n"])
+                # 通知客人
+                push_text_to_user(
+                    booking["u"],
+                    f"您的預約已確認 ✓\n\n"
+                    f"📅 {date_label} {booking['t']}\n\n"
+                    f"期待為您服務 🙏"
+                )
+                # 回覆管理員
+                reply_text(event, f"✅ 已確認 {booking['n']} 的預約\n{date_label} {booking['t']}")
+                delete_pending_booking()
+            else:
+                reply_text(event, "目前沒有待確認的預約。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
+    if intent == "booking_no":
+        if is_admin(user_id):
+            booking = get_pending_booking()
+            if booking:
+                date_label = format_date_label(booking["d"])
+                # 通知客人
+                push_text_to_user(
+                    booking["u"],
+                    f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
+                    f"請輸入「我要預約」重新選擇其他時間 🙏"
+                )
+                # 回覆管理員
+                reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約")
+                delete_pending_booking()
+            else:
+                reply_text(event, "目前沒有待確認的預約。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
     # === Bot 開關檢查 ===
     if not is_bot_active():
         if not is_admin(user_id):
@@ -245,7 +291,7 @@ def handle_text_message(event: MessageEvent):
                     )
             return
 
-        # Step 3：客人選了時段 → 建立預約 + 通知老師
+        # Step 3：客人選了時段 → 暫存待確認 → 通知老師
         if intent == "booking_confirm":
             m = re.search(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", user_text)
             if m:
@@ -254,26 +300,26 @@ def handle_text_message(event: MessageEvent):
                 date_label = format_date_label(date_str)
                 user_name = get_user_name(user_id, configuration)
 
-                # 建立 Google Calendar 事件
-                create_event(date_str, time_str, user_name)
+                # 暫存預約（等管理員確認）
+                save_pending_booking(user_id, date_str, time_str, user_name)
 
                 # 回覆客人
                 reply_text(
                     event,
-                    f"預約完成 ✓\n\n"
+                    f"預約申請已送出 ✓\n\n"
                     f"📅 {date_label} {time_str}\n\n"
-                    f"已通知小夏老師，老師確認後會回覆您。\n\n"
+                    f"小夏老師確認後會通知您，請稍候。\n\n"
                     f"方便的話請先提供：\n"
-                    f"① 您的姓名\n"
-                    f"② 出生年月日（國曆）時間（有最好）\n"
+                    f"① 您的大名\n"
+                    f"② 出生年月日（國曆）\n"
                     f"③ 想了解的問題"
                 )
 
-                # 通知管理員
+                # 通知管理員（含確認指令提示）
                 notify_admin(
                     user_id,
-                    f"📅 預約 {date_label} {time_str}",
-                    reason="新預約",
+                    f"📅 預約申請\n{date_label} {time_str}\n\n回覆 /ok 確認\n回覆 /no 婉拒",
+                    reason="新預約申請",
                 )
             return
 
