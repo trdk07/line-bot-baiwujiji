@@ -13,8 +13,8 @@ from fastapi import APIRouter, Request, HTTPException
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    AsyncApiClient,
-    AsyncMessagingApi,
+    ApiClient,
+    MessagingApi,
     Configuration,
     ReplyMessageRequest,
     TextMessage,
@@ -69,8 +69,8 @@ async def callback(request: Request):
 @handler.add(FollowEvent)
 def handle_follow(event: FollowEvent):
     """用戶加好友 / 解封鎖時觸發。"""
-    with AsyncApiClient(configuration) as api_client:
-        line_bot_api = AsyncMessagingApi(api_client)
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
 
         welcome_text = (
             "歡迎來到「百無禁忌」。\n\n"
@@ -97,8 +97,8 @@ def handle_text_message(event: MessageEvent):
     # --- Echo Mode（確認管線暢通後會換成 AI）---
     reply = f"[Echo] 收到：{user_text}\n\n（AI 客服尚未上線，這是管線測試）"
 
-    with AsyncApiClient(configuration) as api_client:
-        line_bot_api = AsyncMessagingApi(api_client)
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
         line_bot_api.reply_message(
             ReplyMessageRequest(
                 reply_token=event.reply_token,
