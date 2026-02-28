@@ -1,7 +1,9 @@
 """
-LINE Webhook 路由 — Step 2: 關鍵字路由 + Flex Message + AI 助理。
+LINE Webhook 路由 — Step 2.5: 完整功能版。
 
 訊息處理流程：
+[第零層] 管理員指令（/off /on /myid）
+[      ] Bot 開關檢查 — 關閉時只回靜態訊息
 [第一層] 關鍵字比對 → 固定回應（0 Token）
 [第二層] AI 助理 → Gemini（花 Token，但已過濾 80% 的問題）
 """
@@ -30,6 +32,7 @@ from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.ai_service import ask_ai
 from app.services.notify_service import notify_admin
+from app.services.state_service import is_bot_active, set_bot_active
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -87,6 +90,11 @@ def reply_flex(event, flex_dict: dict):
         )
 
 
+def is_admin(user_id: str) -> bool:
+    """檢查是否為管理員。"""
+    return bool(settings.admin_line_user_id and user_id == settings.admin_line_user_id)
+
+
 # ============================================================
 # 意圖 → 回應 對照表
 # ============================================================
@@ -113,6 +121,11 @@ INTENT_HANDLERS = {
     "category_love": lambda event, text: reply_flex(event, fm.love_card()),
     "category_fengshui": lambda event, text: reply_flex(event, fm.fengshui_card()),
     "category_custom": lambda event, text: reply_flex(event, fm.custom_card()),
+
+    # --- 報到登記 ---
+    "checkin_yes": lambda event, text: reply_text(event, "登記完成 ✓"),
+    "checkin_late": lambda event, text: reply_text(event, "登記完成，已備註會晚到 ✓"),
+    "checkin_no": lambda event, text: reply_text(event, "好的，已登記 ✓"),
 }
 
 
@@ -149,19 +162,44 @@ def handle_text_message(event: MessageEvent):
 
     logger.info("User [%s]: %s", user_id, user_text)
 
-    # === 第一層：關鍵字比對（0 Token）===
+    # === 第零層：管理員指令（不受 Bot 開關影響）===
     intent = match_keyword(user_text)
 
+    if intent == "bot_off":
+        if is_admin(user_id):
+            set_bot_active(False)
+            reply_text(event, "🔴 Bot 已關閉，小夏老師親自接管。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
+    if intent == "bot_on":
+        if is_admin(user_id):
+            set_bot_active(True)
+            reply_text(event, "🟢 Bot 已開啟，助理恢復上班。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
+    if intent == "get_my_id":
+        reply_text(event, f"你的 LINE User ID：\n{user_id}")
+        return
+
+    # === Bot 開關檢查 ===
+    if not is_bot_active():
+        # Bot 關閉中，只有管理員指令能通過（上面已處理）
+        # 一般用戶收到靜態訊息
+        if not is_admin(user_id):
+            reply_text(event, "小夏老師目前在線上，請稍候老師回覆 🙏")
+            return
+        # 管理員自己的訊息也不處理（老師正在手動回覆）
+
+    # === 第一層：關鍵字比對（0 Token）===
     if intent:
         # 特殊處理：找小夏老師
         if intent == "human":
             reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
             notify_admin(user_id, user_text, reason="客人要求找小夏老師")
-            return
-
-        # 特殊處理：取得自己的 User ID（管理員設定用）
-        if intent == "get_my_id":
-            reply_text(event, f"你的 LINE User ID：\n{user_id}")
             return
 
         # 一般意圖：查表回應
