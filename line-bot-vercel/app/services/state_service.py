@@ -1,6 +1,8 @@
 """
-簡易狀態管理 — 透過 Vercel KV (Upstash Redis) 儲存 Bot 開關狀態。
-用途：/off 關閉 Bot、/on 開啟 Bot。
+簡易狀態管理 — 透過 Vercel KV (Upstash Redis) 儲存狀態。
+用途：
+  1. /off /on Bot 開關
+  2. 記住用戶是否已看過預約原則說明
 """
 
 import logging
@@ -22,11 +24,14 @@ def _get_kv_url() -> str:
     return settings.kv_rest_api_url
 
 
+# ============================================================
+# Bot 開關
+# ============================================================
 def is_bot_active() -> bool:
     """檢查 Bot 是否在運作中。預設為 True（開啟）。"""
     url = _get_kv_url()
     if not url:
-        return True  # 沒設定 KV 就預設開著
+        return True
 
     try:
         response = httpx.get(
@@ -36,11 +41,11 @@ def is_bot_active() -> bool:
         )
         result = response.json().get("result")
         if result is None:
-            return True  # 沒有值就預設開著
+            return True
         return result != "off"
     except Exception as e:
         logger.error("KV read error: %s", e)
-        return True  # 出錯就預設開著，不影響服務
+        return True
 
 
 def set_bot_active(active: bool):
@@ -60,3 +65,40 @@ def set_bot_active(active: bool):
         logger.info("Bot state set to: %s", value)
     except Exception as e:
         logger.error("KV write error: %s", e)
+
+
+# ============================================================
+# 預約原則：記住用戶是否已看過
+# ============================================================
+def has_seen_principles(user_id: str) -> bool:
+    """檢查用戶是否已看過預約原則說明。"""
+    url = _get_kv_url()
+    if not url:
+        return False  # 沒有 KV 就每次都顯示
+
+    try:
+        response = httpx.get(
+            f"{url}/get/principles:{user_id}",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        result = response.json().get("result")
+        return result == "seen"
+    except Exception:
+        return False
+
+
+def set_seen_principles(user_id: str):
+    """記錄用戶已看過預約原則說明。"""
+    url = _get_kv_url()
+    if not url:
+        return
+
+    try:
+        httpx.get(
+            f"{url}/set/principles:{user_id}/seen",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+    except Exception:
+        pass
