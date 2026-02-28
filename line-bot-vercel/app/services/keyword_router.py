@@ -11,6 +11,8 @@ KEYWORD_PATTERNS = [
     # --- 管理員指令（放最前面，優先比對）---
     (r"^/off$", "bot_off"),
     (r"^/on$", "bot_on"),
+    (r"^/ok$", "booking_ok"),
+    (r"^/no$", "booking_no"),
     (r"^/myid$", "get_my_id"),
 
     # --- 報到登記（0 Token）---
