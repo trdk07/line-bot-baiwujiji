@@ -343,7 +343,7 @@ def booking_card() -> dict:
                     _make_text("③ 想了解的問題", color=GOLD),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("直接在對話框中輸入即可，例如：", color=TEXT_GREY),
-                    _make_text("王小明\n1990/05/15\n最近工作不順，想了解事業方向", color=TEXT_GREY),
+                    _make_text("我是誰\n1990/05/15\n最近工作不順，想了解事業方向", color=TEXT_GREY),
                 ],
             },
         },
@@ -450,7 +450,6 @@ def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_accou
     """顯示匯款資訊，讓客人知道要匯到哪裡。"""
     bank_name = bank_name or "（請聯繫老師取得）"
     bank_account = bank_account or "（請聯繫老師取得）"
-    account_name = account_name or "（請聯繫老師取得）"
 
     return {
         "type": "flex",
@@ -472,7 +471,6 @@ def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_accou
                     _make_text("匯款資訊", size="lg", color=GOLD, weight="bold"),
                     _make_text(f"銀行：{bank_name}", color=TEXT_WHITE),
                     _make_text(f"帳號：{bank_account}", color=TEXT_WHITE),
-                    _make_text(f"戶名：{account_name}", color=TEXT_WHITE),
                     _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
 
