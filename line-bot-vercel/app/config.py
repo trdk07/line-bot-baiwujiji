@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     kv_rest_api_url: str = ""
     kv_rest_api_token: str = ""
 
+    # Google Calendar（預約功能用）
+    google_service_account_json: str = ""
+    google_calendar_id: str = ""
+
     model_config = {
         "env_file": ".env" if os.path.exists(".env") else None,
         "env_file_encoding": "utf-8",
