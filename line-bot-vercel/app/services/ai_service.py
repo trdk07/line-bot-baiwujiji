@@ -8,7 +8,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """你是「百無禁忌工作室」的櫃台助理，不是小夏老師本人。
+SYSTEM_PROMPT = """你是「百無禁忌工作室」的小助理，不是小夏老師本人。
 你的工作是接待客人、回答基本問題、引導預約。
 
 【工作室資訊】
@@ -43,7 +43,7 @@ def ask_ai(user_message: str) -> str:
     settings = get_settings()
 
     if not settings.gemini_api_key:
-        return "目前助理還在訓練中，你可以直接輸入「找小夏老師」讓老師親自回覆你。"
+        return "目前助理還在測試中，你可以直接輸入「找小夏老師」讓老師親自回覆你。"
 
     try:
         genai.configure(api_key=settings.gemini_api_key)
