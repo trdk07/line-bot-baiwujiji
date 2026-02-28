@@ -269,6 +269,56 @@ def custom_card() -> dict:
 
 
 # ============================================================
+# 預約原則說明（首次預約時顯示，只出現一次）
+# ============================================================
+def principles_card() -> dict:
+    return {
+        "type": "flex",
+        "altText": "預約諮詢前，請先了解百無禁忌的原則",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("預約諮詢前", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("請先了解百無禁忌的原則", size="md", color=GOLD, weight="bold", align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+
+                    _make_text("① 玄學可以很科學", size="md", color=GOLD, weight="bold"),
+                    _make_text(
+                        "是能落地的日常策略。預約諮詢不代表一定要「做法術」，就像看診一樣，先幫你找出目前卡關的核心盲點。有時候，你需要的只是一套能落實在日常的能量策略。",
+                        color=TEXT_GREY,
+                    ),
+                    {"type": "separator", "color": DIVIDER, "margin": "md"},
+
+                    _make_text("② 專業需要付費", size="md", color=GOLD, weight="bold"),
+                    _make_text(
+                        "可以理解成能量交換。你可以跟我聊聊發生了什麼事，但只要開始運用專業知識為你梳理脈絡、對症下藥，就需要收取諮詢費。",
+                        color=TEXT_GREY,
+                    ),
+                    {"type": "separator", "color": DIVIDER, "margin": "md"},
+
+                    _make_text("③ 疑人不用，不勉強、不耗損", size="md", color=GOLD, weight="bold"),
+                    _make_text(
+                        "隔著網路沒見過面，有疑慮很合理。如果覺得不需要協助，或是對諮詢金額感到有壓力，可以直接說「先不用」。千萬別覺得不好意思。當你準備好了、願意交付信任時，我們再開始。",
+                        color=TEXT_GREY,
+                    ),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+
+                    _make_text("確認以上原則，準備好了嗎？", size="sm", color=TEXT_WHITE, align="center"),
+                    _make_button("✦ 我要預約", "我要預約"),
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
 # 預約引導卡片（Google Calendar 未設定時的備用）
 # ============================================================
 def booking_card() -> dict:
