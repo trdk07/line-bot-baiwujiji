@@ -63,4 +63,4 @@ def ask_ai(user_message: str) -> str:
 
     except Exception as e:
         logger.error("Gemini AI error: %s (type: %s)", e, type(e).__name__)
-        return "不好意思，系統忙碌中。你可以輸入「找小夏老師」，讓老師直接回覆你。"
+        return f"[DEBUG] {type(e).__name__}: {e}"
