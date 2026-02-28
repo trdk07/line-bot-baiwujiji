@@ -3,8 +3,10 @@
 用途：
   1. /off /on Bot 開關
   2. 記住用戶是否已看過預約原則說明
+  3. 暫存待確認的預約（管理員 /ok /no）
 """
 
+import json
 import logging
 import httpx
 from app.config import get_settings
@@ -74,7 +76,7 @@ def has_seen_principles(user_id: str) -> bool:
     """檢查用戶是否已看過預約原則說明。"""
     url = _get_kv_url()
     if not url:
-        return False  # 沒有 KV 就每次都顯示
+        return False
 
     try:
         response = httpx.get(
@@ -98,6 +100,67 @@ def set_seen_principles(user_id: str):
         httpx.get(
             f"{url}/set/principles:{user_id}/seen",
             headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+# ============================================================
+# 待確認預約：暫存客人的預約申請
+# ============================================================
+def save_pending_booking(user_id: str, date_str: str, time_str: str, user_name: str):
+    """儲存一筆待確認的預約。"""
+    url = _get_kv_url()
+    if not url:
+        return
+
+    data = json.dumps(
+        {"u": user_id, "d": date_str, "t": time_str, "n": user_name},
+        ensure_ascii=False,
+    )
+    try:
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["SET", "pending_booking", data],
+            timeout=3.0,
+        )
+    except Exception as e:
+        logger.error("Save pending booking error: %s", e)
+
+
+def get_pending_booking() -> dict:
+    """取得待確認的預約，回傳 None 代表沒有。"""
+    url = _get_kv_url()
+    if not url:
+        return None
+
+    try:
+        response = httpx.get(
+            f"{url}/get/pending_booking",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        result = response.json().get("result")
+        if not result:
+            return None
+        return json.loads(result)
+    except Exception:
+        return None
+
+
+def delete_pending_booking():
+    """刪除待確認的預約。"""
+    url = _get_kv_url()
+    if not url:
+        return
+
+    try:
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["DEL", "pending_booking"],
             timeout=3.0,
         )
     except Exception:
