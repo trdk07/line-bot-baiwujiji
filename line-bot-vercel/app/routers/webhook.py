@@ -1,13 +1,15 @@
 """
-LINE Webhook 路由 — Step 3: Google Calendar 預約整合 + 管理員確認機制。
+LINE Webhook 路由 — Step 4: 預約 + 付款確認三步機制。
 
 訊息處理流程：
-[第零層] 管理員指令（/off /on /ok /no /myid）
+[第零層] 管理員指令（/off /on /ok /no /paid /myid）
 [      ] Bot 開關檢查
 [第一層] 關鍵字比對 → 固定回應（0 Token）
   ├── 預約流程：原則說明（首次）→ 日期 → 時段 → 等待確認
-  ├── 管理員確認：/ok 確認預約 → 寫入行事曆 → 通知客人
-  ├── 管理員拒絕：/no 拒絕預約 → 通知客人
+  ├── 管理員確認日期：/ok → 發匯款資訊給客人
+  ├── 管理員拒絕：/no → 通知客人
+  ├── 客人回報匯款：已匯款 → 通知管理員
+  ├── 管理員確認收款：/paid → 建立日曆事件 → 通知客人
   └── 其他關鍵字
 [第二層] AI 助理 → Gemini
 """
@@ -36,11 +38,12 @@ from linebot.v3.webhooks import (
 from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.ai_service import ask_ai
-from app.services.notify_service import notify_admin, get_user_name, push_text_to_user
+from app.services.notify_service import notify_admin, get_user_name, push_text_to_user, push_flex_to_user
 from app.services.state_service import (
     is_bot_active, set_bot_active,
     has_seen_principles, set_seen_principles,
-    save_pending_booking, get_pending_booking, delete_pending_booking,
+    save_booking, get_booking, update_booking_status, delete_booking,
+    set_admin_context, get_admin_context,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -199,46 +202,110 @@ def handle_text_message(event: MessageEvent):
         reply_text(event, f"你的 LINE User ID：\n{user_id}")
         return
 
-    # --- 管理員確認/拒絕預約 ---
+    # ----------------------------------------------------------
+    # 管理員 /ok：確認日期可以 → 自動發匯款資訊給客人
+    # ----------------------------------------------------------
     if intent == "booking_ok":
         if is_admin(user_id):
-            booking = get_pending_booking()
-            if booking:
-                date_label = format_date_label(booking["d"])
-                # 寫入 Google Calendar
-                create_event(booking["d"], booking["t"], booking["n"])
-                # 通知客人
-                push_text_to_user(
-                    booking["u"],
-                    f"您的預約已確認 ✓\n\n"
-                    f"📅 {date_label} {booking['t']}\n\n"
-                    f"期待為您服務 🙏"
-                )
-                # 回覆管理員
-                reply_text(event, f"✅ 已確認 {booking['n']} 的預約\n{date_label} {booking['t']}")
-                delete_pending_booking()
-            else:
-                reply_text(event, "目前沒有待確認的預約。")
+            ctx_user = get_admin_context()
+            if not ctx_user:
+                reply_text(event, "目前沒有待處理的預約。")
+                return
+            booking = get_booking(ctx_user)
+            if not booking or booking.get("s") != "pending":
+                reply_text(event, "目前沒有待確認日期的預約。")
+                return
+
+            date_label = format_date_label(booking["d"])
+
+            # 更新狀態 → 等待匯款
+            update_booking_status(ctx_user, "awaiting_payment")
+
+            # 推送匯款資訊卡片給客人
+            push_flex_to_user(
+                ctx_user,
+                fm.payment_info_card(
+                    date_label,
+                    booking["t"],
+                    settings.payment_bank_name,
+                    settings.payment_bank_account,
+                    settings.payment_account_name,
+                ),
+            )
+
+            reply_text(
+                event,
+                f"✅ 已確認 {booking['n']} 的日期\n"
+                f"{date_label} {booking['t']}\n\n"
+                f"匯款資訊已發送給客人，等待匯款回報。"
+            )
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return
 
+    # ----------------------------------------------------------
+    # 管理員 /no：婉拒預約
+    # ----------------------------------------------------------
     if intent == "booking_no":
         if is_admin(user_id):
-            booking = get_pending_booking()
-            if booking:
-                date_label = format_date_label(booking["d"])
-                # 通知客人
-                push_text_to_user(
-                    booking["u"],
-                    f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
-                    f"請輸入「我要預約」重新選擇其他時間 🙏"
-                )
-                # 回覆管理員
-                reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約")
-                delete_pending_booking()
-            else:
-                reply_text(event, "目前沒有待確認的預約。")
+            ctx_user = get_admin_context()
+            if not ctx_user:
+                reply_text(event, "目前沒有待處理的預約。")
+                return
+            booking = get_booking(ctx_user)
+            if not booking:
+                reply_text(event, "目前沒有待處理的預約。")
+                return
+
+            date_label = format_date_label(booking["d"])
+
+            # 通知客人
+            push_text_to_user(
+                ctx_user,
+                f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
+                f"請輸入「我要預約」重新選擇其他時間 🙏"
+            )
+
+            reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約")
+            delete_booking(ctx_user)
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
+    # ----------------------------------------------------------
+    # 管理員 /paid：確認收到款項 → 建立日曆事件 → 完成預約
+    # ----------------------------------------------------------
+    if intent == "booking_paid":
+        if is_admin(user_id):
+            ctx_user = get_admin_context()
+            if not ctx_user:
+                reply_text(event, "目前沒有待處理的預約。")
+                return
+            booking = get_booking(ctx_user)
+            if not booking or booking.get("s") != "payment_reported":
+                reply_text(event, "目前沒有已回報匯款的預約。\n（客人需先回報「已匯款」）")
+                return
+
+            date_label = format_date_label(booking["d"])
+
+            # 建立 Google Calendar 事件
+            create_event(booking["d"], booking["t"], booking["n"])
+
+            # 通知客人：預約完成
+            push_text_to_user(
+                ctx_user,
+                f"您的預約已完成確認 🎉\n\n"
+                f"📅 {date_label} {booking['t']}\n\n"
+                f"期待為您服務 🙏"
+            )
+
+            reply_text(
+                event,
+                f"✅ 已完成 {booking['n']} 的預約\n"
+                f"{date_label} {booking['t']}\n"
+                f"行事曆已建立 📅"
+            )
+            delete_booking(ctx_user)
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return
@@ -256,6 +323,39 @@ def handle_text_message(event: MessageEvent):
         if intent == "human":
             reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
             notify_admin(user_id, user_text, reason="客人要求找小夏老師")
+            return
+
+        # ----------------------------------------------------------
+        # 客人回報：已匯款
+        # ----------------------------------------------------------
+        if intent == "payment_reported":
+            booking = get_booking(user_id)
+            if booking and booking.get("s") == "awaiting_payment":
+                # 更新狀態
+                update_booking_status(user_id, "payment_reported")
+                set_admin_context(user_id)
+
+                date_label = format_date_label(booking["d"])
+
+                reply_text(
+                    event,
+                    "已收到您的匯款回報 ✓\n\n"
+                    "確認收款後會通知您，請稍候。"
+                )
+
+                # 通知管理員
+                notify_admin(
+                    user_id,
+                    f"💰 客人回報已匯款\n"
+                    f"{date_label} {booking['t']}\n\n"
+                    f"確認收款後回覆 /paid",
+                    reason="匯款回報",
+                )
+            else:
+                reply_text(
+                    event,
+                    "目前沒有待匯款的預約紀錄。\n如需預約，請輸入「我要預約」。"
+                )
             return
 
         # --- 預約流程 ---
@@ -291,7 +391,7 @@ def handle_text_message(event: MessageEvent):
                     )
             return
 
-        # Step 3：客人選了時段 → 暫存待確認 → 通知老師
+        # Step 3：客人選了時段 → 暫存預約 → 通知老師
         if intent == "booking_confirm":
             m = re.search(r"(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})", user_text)
             if m:
@@ -300,8 +400,9 @@ def handle_text_message(event: MessageEvent):
                 date_label = format_date_label(date_str)
                 user_name = get_user_name(user_id, configuration)
 
-                # 暫存預約（等管理員確認）
-                save_pending_booking(user_id, date_str, time_str, user_name)
+                # 儲存預約（狀態：pending，等管理員確認日期）
+                save_booking(user_id, date_str, time_str, user_name)
+                set_admin_context(user_id)
 
                 # 回覆客人
                 reply_text(
@@ -315,10 +416,13 @@ def handle_text_message(event: MessageEvent):
                     f"③ 想了解的問題"
                 )
 
-                # 通知管理員（含確認指令提示）
+                # 通知管理員
                 notify_admin(
                     user_id,
-                    f"📅 預約申請\n{date_label} {time_str}\n\n回覆 /ok 確認\n回覆 /no 婉拒",
+                    f"📅 預約申請\n"
+                    f"{date_label} {time_str}\n\n"
+                    f"回覆 /ok 確認日期（會發匯款資訊）\n"
+                    f"回覆 /no 婉拒",
                     reason="新預約申請",
                 )
             return

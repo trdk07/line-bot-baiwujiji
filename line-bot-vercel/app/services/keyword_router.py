@@ -13,12 +13,16 @@ KEYWORD_PATTERNS = [
     (r"^/on$", "bot_on"),
     (r"^/ok$", "booking_ok"),
     (r"^/no$", "booking_no"),
+    (r"^/paid$", "booking_paid"),
     (r"^/myid$", "get_my_id"),
 
     # --- 報到登記（0 Token）---
     (r"^我會到$|^會到$|^報到$|^\+1$|^到$|^我到了$|^我要來$", "checkin_yes"),
     (r"會晚到|晚到|晚一點", "checkin_late"),
     (r"^pass$|^不到$|^不去$|^請假$|不會到", "checkin_no"),
+
+    # --- 匯款回報（放在預約流程前面）---
+    (r"已匯款|已轉帳|匯好了|轉好了|已付款", "payment_reported"),
 
     # --- 預約流程（放在 booking 前面，優先比對日期格式）---
     (r"^預約\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", "booking_confirm"),

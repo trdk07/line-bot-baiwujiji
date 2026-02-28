@@ -4,7 +4,9 @@
 
 import logging
 from linebot.v3.messaging import (
-    ApiClient, MessagingApi, Configuration, PushMessageRequest, TextMessage,
+    ApiClient, MessagingApi, Configuration,
+    PushMessageRequest, TextMessage,
+    FlexMessage, FlexContainer,
 )
 from app.config import get_settings
 
@@ -62,3 +64,25 @@ def push_text_to_user(target_user_id: str, text: str):
             )
     except Exception as e:
         logger.error("Push to user %s failed: %s", target_user_id, e)
+
+
+def push_flex_to_user(target_user_id: str, flex_dict: dict):
+    """推送 Flex Message 卡片給指定用戶（用於發送匯款資訊等）。"""
+    settings = get_settings()
+    try:
+        configuration = Configuration(access_token=settings.line_channel_access_token)
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=target_user_id,
+                    messages=[
+                        FlexMessage(
+                            alt_text=flex_dict["altText"],
+                            contents=FlexContainer.from_dict(flex_dict["contents"]),
+                        )
+                    ],
+                )
+            )
+    except Exception as e:
+        logger.error("Push flex to user %s failed: %s", target_user_id, e)

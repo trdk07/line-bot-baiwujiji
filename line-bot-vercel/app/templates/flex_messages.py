@@ -441,3 +441,44 @@ def time_picker_card(date_str: str, slots: list) -> dict:
             },
         },
     }
+
+
+# ============================================================
+# 匯款資訊卡片（管理員確認日期後發送給客人）
+# ============================================================
+def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_account: str, account_name: str) -> dict:
+    """顯示匯款資訊，讓客人知道要匯到哪裡。"""
+    bank_name = bank_name or "（請聯繫老師取得）"
+    bank_account = bank_account or "（請聯繫老師取得）"
+    account_name = account_name or "（請聯繫老師取得）"
+
+    return {
+        "type": "flex",
+        "altText": "匯款資訊 — 預約日期已確認",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("日期已確認 ✓", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+
+                    _make_text("匯款資訊", size="lg", color=GOLD, weight="bold"),
+                    _make_text(f"銀行：{bank_name}", color=TEXT_WHITE),
+                    _make_text(f"帳號：{bank_account}", color=TEXT_WHITE),
+                    _make_text(f"戶名：{account_name}", color=TEXT_WHITE),
+                    _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+
+                    _make_text("匯款完成後，請點下方按鈕或輸入「已匯款」通知我們。", color=TEXT_GREY),
+                    _make_button("✦ 已匯款", "已匯款"),
+                ],
+            },
+        },
+    }

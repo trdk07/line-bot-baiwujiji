@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     google_service_account_json: str = ""
     google_calendar_id: str = ""
 
+    # 匯款資訊（預約確認後發送給客人）
+    payment_bank_name: str = ""
+    payment_bank_account: str = ""
+    payment_account_name: str = ""
+
     model_config = {
         "env_file": ".env" if os.path.exists(".env") else None,
         "env_file_encoding": "utf-8",

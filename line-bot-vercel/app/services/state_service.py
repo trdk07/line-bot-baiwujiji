@@ -3,7 +3,10 @@
 用途：
   1. /off /on Bot 開關
   2. 記住用戶是否已看過預約原則說明
-  3. 暫存待確認的預約（管理員 /ok /no）
+  3. 預約狀態管理（per-user，含付款流程）
+
+預約狀態流程：
+  pending → awaiting_payment → payment_reported → (完成刪除)
 """
 
 import json
@@ -107,38 +110,43 @@ def set_seen_principles(user_id: str):
 
 
 # ============================================================
-# 待確認預約：暫存客人的預約申請
+# 預約管理（per-user，含狀態追蹤）
 # ============================================================
-def save_pending_booking(user_id: str, date_str: str, time_str: str, user_name: str):
-    """儲存一筆待確認的預約。"""
+# KV key:   booking:{user_id}
+# KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
+#
+# admin_context: 記住管理員目前正在處理哪位客人的預約
+
+def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
+    """儲存新預約（狀態：pending）。"""
     url = _get_kv_url()
     if not url:
         return
 
     data = json.dumps(
-        {"u": user_id, "d": date_str, "t": time_str, "n": user_name},
+        {"d": date_str, "t": time_str, "n": user_name, "s": "pending"},
         ensure_ascii=False,
     )
     try:
         httpx.post(
             url,
             headers=_get_kv_headers(),
-            json=["SET", "pending_booking", data],
+            json=["SET", f"booking:{user_id}", data],
             timeout=3.0,
         )
     except Exception as e:
-        logger.error("Save pending booking error: %s", e)
+        logger.error("Save booking error: %s", e)
 
 
-def get_pending_booking() -> dict:
-    """取得待確認的預約，回傳 None 代表沒有。"""
+def get_booking(user_id: str) -> dict:
+    """取得指定用戶的預約資料。回傳 None 代表沒有。"""
     url = _get_kv_url()
     if not url:
         return None
 
     try:
         response = httpx.get(
-            f"{url}/get/pending_booking",
+            f"{url}/get/booking:{user_id}",
             headers=_get_kv_headers(),
             timeout=3.0,
         )
@@ -150,8 +158,28 @@ def get_pending_booking() -> dict:
         return None
 
 
-def delete_pending_booking():
-    """刪除待確認的預約。"""
+def update_booking_status(user_id: str, status: str):
+    """更新預約狀態（pending → awaiting_payment → payment_reported）。"""
+    booking = get_booking(user_id)
+    if not booking:
+        return
+
+    booking["s"] = status
+    url = _get_kv_url()
+    data = json.dumps(booking, ensure_ascii=False)
+    try:
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["SET", f"booking:{user_id}", data],
+            timeout=3.0,
+        )
+    except Exception as e:
+        logger.error("Update booking status error: %s", e)
+
+
+def delete_booking(user_id: str):
+    """刪除預約紀錄。"""
     url = _get_kv_url()
     if not url:
         return
@@ -160,8 +188,42 @@ def delete_pending_booking():
         httpx.post(
             url,
             headers=_get_kv_headers(),
-            json=["DEL", "pending_booking"],
+            json=["DEL", f"booking:{user_id}"],
             timeout=3.0,
         )
     except Exception:
         pass
+
+
+def set_admin_context(user_id: str):
+    """記住管理員目前正在處理哪位客人的預約。"""
+    url = _get_kv_url()
+    if not url:
+        return
+
+    try:
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["SET", "admin_context", user_id],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+def get_admin_context() -> str:
+    """取得管理員目前處理中的客人 user_id。"""
+    url = _get_kv_url()
+    if not url:
+        return None
+
+    try:
+        response = httpx.get(
+            f"{url}/get/admin_context",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        return response.json().get("result")
+    except Exception:
+        return None
