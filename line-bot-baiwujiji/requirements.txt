@@ -1,0 +1,14 @@
+# === Step 1: Core ===
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+line-bot-sdk==3.11.0
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+httpx==0.27.2
+
+# === Future Steps (uncomment when needed) ===
+# google-api-python-client==2.149.0
+# google-auth-oauthlib==1.2.1
+# openai==1.51.0
+# google-generativeai==0.8.1
