@@ -42,6 +42,7 @@ from app.services.ai_service import ask_ai
 from app.services.notify_service import notify_admin, get_user_name, push_text_to_user, push_flex_to_user
 from app.services.state_service import (
     is_bot_active, set_bot_active,
+    has_been_notified_bot_off, mark_notified_bot_off,
     has_seen_principles, set_seen_principles,
     save_booking, get_booking, update_booking_status, delete_booking,
     set_admin_context, get_admin_context,
@@ -315,7 +316,9 @@ def handle_text_message(event: MessageEvent):
     # === Bot 開關檢查 ===
     if not is_bot_active():
         if not is_admin(user_id):
-            reply_text(event, "小夏老師目前在線上，請稍候老師回覆 🙏")
+            if not has_been_notified_bot_off(user_id):
+                mark_notified_bot_off(user_id)
+                reply_text(event, "小夏老師目前在線上，請稍候老師回覆 🙏")
             return
 
     # === 第一層：關鍵字比對（0 Token）===

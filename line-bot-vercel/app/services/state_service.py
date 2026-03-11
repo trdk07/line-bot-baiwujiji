@@ -55,7 +55,7 @@ def is_bot_active() -> bool:
 
 
 def set_bot_active(active: bool):
-    """設定 Bot 開關狀態。"""
+    """設定 Bot 開關狀態。開啟時自動清除所有「老師在線」已通知紀錄。"""
     url = _get_kv_url()
     if not url:
         logger.warning("KV not configured, cannot set bot state")
@@ -69,8 +69,55 @@ def set_bot_active(active: bool):
             timeout=3.0,
         )
         logger.info("Bot state set to: %s", value)
+
+        # 開啟 Bot 時，清除「老師在線」通知計數器
+        if active:
+            httpx.post(
+                url,
+                headers=_get_kv_headers(),
+                json=["DEL", "bot_off_notified"],
+                timeout=3.0,
+            )
     except Exception as e:
         logger.error("KV write error: %s", e)
+
+
+# ============================================================
+# Bot 關閉時：記錄用戶是否已收過「老師在線」通知
+# ============================================================
+def has_been_notified_bot_off(user_id: str) -> bool:
+    """檢查該用戶是否已經收過「老師在線」通知（本次關閉期間）。"""
+    url = _get_kv_url()
+    if not url:
+        return False
+
+    try:
+        response = httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["SISMEMBER", "bot_off_notified", user_id],
+            timeout=3.0,
+        )
+        return response.json().get("result") == 1
+    except Exception:
+        return False
+
+
+def mark_notified_bot_off(user_id: str):
+    """標記該用戶已收過「老師在線」通知。"""
+    url = _get_kv_url()
+    if not url:
+        return
+
+    try:
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["SADD", "bot_off_notified", user_id],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
 
 
 # ============================================================
