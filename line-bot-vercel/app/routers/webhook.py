@@ -414,6 +414,24 @@ def handle_text_message(event: MessageEvent):
 
         # 入口：「我要預約」
         if intent == "booking":
+            # 檢查是否已有進行中的預約
+            existing = get_booking(user_id)
+            if existing:
+                status_msg = {
+                    "pending": "您的預約正在等待老師確認日期",
+                    "awaiting_payment": "您的預約已確認，請完成匯款後按「已匯款」",
+                    "payment_reported": "您的匯款正在確認中",
+                }.get(existing["s"], "您已有一筆預約在處理中")
+                date_label = format_date_label(existing["d"])
+                reply_text(
+                    event,
+                    f"您目前已有一筆預約：\n\n"
+                    f"📅 {date_label} {existing['t']}\n"
+                    f"狀態：{status_msg}\n\n"
+                    f"如需取消或更改，請輸入「找小夏老師」聯繫老師。"
+                )
+                return
+
             # 第一次：顯示原則說明（只出現一次）
             if not has_seen_principles(user_id):
                 set_seen_principles(user_id)
