@@ -19,10 +19,10 @@ TW_TZ = timezone(timedelta(hours=8))
 # 每週可預約時段（weekday: 0=週一 ~ 6=週日）
 # 每個時段為 (開始時, 開始分, 結束時, 結束分)
 WEEKLY_SLOTS = {
-    1: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週二
-    2: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週三
-    3: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週四
-    6: [(20, 0, 0, 0)],                     # 週日
+    1: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週二 14:00-17:00, 23:00-01:00
+    2: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週三 14:00-17:00, 23:00-01:00
+    3: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週四 14:00-17:00, 23:00-01:00
+    6: [(20, 0, 1, 0)],                     # 週日 20:00-01:00
 }
 SLOT_DURATION = 60  # 每個時段 60 分鐘
 
@@ -74,10 +74,11 @@ def _generate_slot_times(date: datetime) -> list:
         start_h, start_m = slot_range[0], slot_range[1]
         end_h, end_m = slot_range[2], slot_range[3]
 
-        # 處理跨午夜（例如 23:00-00:00）
+        # 處理跨午夜（例如 23:00-01:00）
         start_dt = date.replace(hour=start_h, minute=start_m, second=0, tzinfo=TW_TZ)
-        if end_h == 0 and end_m == 0:
-            end_dt = (date + timedelta(days=1)).replace(hour=0, minute=0, second=0, tzinfo=TW_TZ)
+        if end_h < start_h:
+            # 結束時間在隔天
+            end_dt = (date + timedelta(days=1)).replace(hour=end_h, minute=end_m, second=0, tzinfo=TW_TZ)
         else:
             end_dt = date.replace(hour=end_h, minute=end_m, second=0, tzinfo=TW_TZ)
 
