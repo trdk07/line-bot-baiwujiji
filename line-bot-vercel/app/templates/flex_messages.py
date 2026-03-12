@@ -486,7 +486,10 @@ def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_accou
                     _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
 
-                    _make_text("匯款完成後，請點下方按鈕或輸入「已匯款」通知我們。", color=TEXT_GREY),
+                    _make_text(
+                        "⚠️ 匯款完成後，請務必按下方「已匯款」按鈕或輸入「已匯款」通知我們，預約才算正式成立。",
+                        color=TEXT_WHITE,
+                    ),
                     _make_button("✦ 已匯款", "已匯款"),
                 ],
             },

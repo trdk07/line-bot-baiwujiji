@@ -202,10 +202,11 @@ def is_ai_rate_limited(user_id: str, max_calls: int = 5, window_seconds: int = 6
 # KV key:   booking:{user_id}
 # KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
 #
-# admin_context: 記住管理員目前正在處理哪位客人的預約
+# booking_queue: 預約佇列（Redis List），存放所有待處理的 user_id（按時間順序）
+# 每位客人的預約資料仍存在 booking:{user_id}
 
 def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
-    """儲存新預約（狀態：pending）。"""
+    """儲存新預約（狀態：pending）並加入佇列。"""
     url = _get_kv_url()
     if not url:
         return
@@ -219,6 +220,19 @@ def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
             url,
             headers=_get_kv_headers(),
             json=["SET", f"booking:{user_id}", data],
+            timeout=3.0,
+        )
+        # 先移除舊的（避免重複），再加入佇列尾端
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["LREM", "booking_queue", 0, user_id],
+            timeout=3.0,
+        )
+        httpx.post(
+            url,
+            headers=_get_kv_headers(),
+            json=["RPUSH", "booking_queue", user_id],
             timeout=3.0,
         )
     except Exception as e:
@@ -266,7 +280,7 @@ def update_booking_status(user_id: str, status: str):
 
 
 def delete_booking(user_id: str):
-    """刪除預約紀錄。"""
+    """刪除預約紀錄並從佇列移除。"""
     url = _get_kv_url()
     if not url:
         return
@@ -278,39 +292,44 @@ def delete_booking(user_id: str):
             json=["DEL", f"booking:{user_id}"],
             timeout=3.0,
         )
-    except Exception:
-        pass
-
-
-def set_admin_context(user_id: str):
-    """記住管理員目前正在處理哪位客人的預約。"""
-    url = _get_kv_url()
-    if not url:
-        return
-
-    try:
         httpx.post(
             url,
             headers=_get_kv_headers(),
-            json=["SET", "admin_context", user_id],
+            json=["LREM", "booking_queue", 0, user_id],
             timeout=3.0,
         )
     except Exception:
         pass
 
 
-def get_admin_context() -> str:
-    """取得管理員目前處理中的客人 user_id。"""
+def get_booking_queue() -> list:
+    """取得預約佇列中所有 user_id（按先後順序）。"""
     url = _get_kv_url()
     if not url:
-        return None
+        return []
 
     try:
-        response = httpx.get(
-            f"{url}/get/admin_context",
+        response = httpx.post(
+            url,
             headers=_get_kv_headers(),
+            json=["LRANGE", "booking_queue", 0, -1],
             timeout=3.0,
         )
-        return response.json().get("result")
+        result = response.json().get("result")
+        return result if result else []
     except Exception:
-        return None
+        return []
+
+
+def get_queue_bookings_by_status(status: str) -> list:
+    """
+    取得佇列中指定狀態的預約列表。
+    回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
+    """
+    queue = get_booking_queue()
+    results = []
+    for uid in queue:
+        booking = get_booking(uid)
+        if booking and booking.get("s") == status:
+            results.append({"user_id": uid, "booking": booking})
+    return results
