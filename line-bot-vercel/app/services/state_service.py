@@ -30,6 +30,29 @@ def _get_kv_url() -> str:
     return settings.kv_rest_api_url
 
 
+def _pipeline(commands: list) -> list:
+    """
+    Upstash REST Pipeline：一次 HTTP 請求送出多個 Redis 指令。
+    commands: [["SET", "key", "val"], ["GET", "key"], ...]
+    回傳: 每個指令的 result 列表。
+    """
+    url = _get_kv_url()
+    if not url:
+        return [None] * len(commands)
+
+    try:
+        response = httpx.post(
+            f"{url}/pipeline",
+            headers=_get_kv_headers(),
+            json=commands,
+            timeout=5.0,
+        )
+        return [r.get("result") for r in response.json()]
+    except Exception as e:
+        logger.error("KV pipeline error: %s", e)
+        return [None] * len(commands)
+
+
 # ============================================================
 # Bot 開關
 # ============================================================
@@ -206,37 +229,16 @@ def is_ai_rate_limited(user_id: str, max_calls: int = 5, window_seconds: int = 6
 # 每位客人的預約資料仍存在 booking:{user_id}
 
 def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
-    """儲存新預約（狀態：pending）並加入佇列。"""
-    url = _get_kv_url()
-    if not url:
-        return
-
+    """儲存新預約（狀態：pending）並加入佇列。（1 次 HTTP pipeline）"""
     data = json.dumps(
         {"d": date_str, "t": time_str, "n": user_name, "s": "pending"},
         ensure_ascii=False,
     )
-    try:
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["SET", f"booking:{user_id}", data],
-            timeout=3.0,
-        )
-        # 先移除舊的（避免重複），再加入佇列尾端
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["LREM", "booking_queue", 0, user_id],
-            timeout=3.0,
-        )
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["RPUSH", "booking_queue", user_id],
-            timeout=3.0,
-        )
-    except Exception as e:
-        logger.error("Save booking error: %s", e)
+    _pipeline([
+        ["SET", f"booking:{user_id}", data],
+        ["LREM", "booking_queue", 0, user_id],
+        ["RPUSH", "booking_queue", user_id],
+    ])
 
 
 def get_booking(user_id: str) -> dict:
@@ -259,14 +261,21 @@ def get_booking(user_id: str) -> dict:
         return None
 
 
-def update_booking_status(user_id: str, status: str):
-    """更新預約狀態（pending → awaiting_payment → payment_reported）。"""
-    booking = get_booking(user_id)
+def update_booking_status(user_id: str, status: str, booking: dict = None):
+    """
+    更新預約狀態（pending → awaiting_payment → payment_reported）。
+    可傳入已讀取的 booking 避免重複 GET。
+    """
+    if not booking:
+        booking = get_booking(user_id)
     if not booking:
         return
 
     booking["s"] = status
     url = _get_kv_url()
+    if not url:
+        return
+
     data = json.dumps(booking, ensure_ascii=False)
     try:
         httpx.post(
@@ -280,56 +289,40 @@ def update_booking_status(user_id: str, status: str):
 
 
 def delete_booking(user_id: str):
-    """刪除預約紀錄並從佇列移除。"""
-    url = _get_kv_url()
-    if not url:
-        return
-
-    try:
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["DEL", f"booking:{user_id}"],
-            timeout=3.0,
-        )
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["LREM", "booking_queue", 0, user_id],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    """刪除預約紀錄並從佇列移除。（1 次 HTTP pipeline）"""
+    _pipeline([
+        ["DEL", f"booking:{user_id}"],
+        ["LREM", "booking_queue", 0, user_id],
+    ])
 
 
 def get_booking_queue() -> list:
     """取得預約佇列中所有 user_id（按先後順序）。"""
-    url = _get_kv_url()
-    if not url:
-        return []
-
-    try:
-        response = httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["LRANGE", "booking_queue", 0, -1],
-            timeout=3.0,
-        )
-        result = response.json().get("result")
-        return result if result else []
-    except Exception:
-        return []
+    results = _pipeline([["LRANGE", "booking_queue", 0, -1]])
+    return results[0] if results[0] else []
 
 
 def get_queue_bookings_by_status(status: str) -> list:
     """
-    取得佇列中指定狀態的預約列表。
+    取得佇列中指定狀態的預約列表（用 pipeline 批次查詢）。
     回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
+    不論佇列多長，只發 2 次 HTTP 請求（1 次取佇列 + 1 次批次取所有預約）。
     """
     queue = get_booking_queue()
+    if not queue:
+        return []
+
+    # 用 pipeline 一次取出所有預約資料
+    commands = [["GET", f"booking:{uid}"] for uid in queue]
+    booking_jsons = _pipeline(commands)
+
     results = []
-    for uid in queue:
-        booking = get_booking(uid)
-        if booking and booking.get("s") == status:
-            results.append({"user_id": uid, "booking": booking})
+    for uid, raw in zip(queue, booking_jsons):
+        if raw:
+            try:
+                booking = json.loads(raw)
+                if booking.get("s") == status:
+                    results.append({"user_id": uid, "booking": booking})
+            except (json.JSONDecodeError, TypeError):
+                pass
     return results

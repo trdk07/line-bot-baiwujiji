@@ -270,8 +270,8 @@ def handle_text_message(event: MessageEvent):
 
             date_label = format_date_label(booking["d"])
 
-            # 更新狀態 → 等待匯款
-            update_booking_status(ctx_user, "awaiting_payment")
+            # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
+            update_booking_status(ctx_user, "awaiting_payment", booking)
 
             # 推送匯款資訊卡片給客人
             push_flex_to_user(
@@ -384,8 +384,8 @@ def handle_text_message(event: MessageEvent):
         if intent == "payment_reported":
             booking = get_booking(user_id)
             if booking and booking.get("s") == "awaiting_payment":
-                # 更新狀態
-                update_booking_status(user_id, "payment_reported")
+                # 更新狀態（傳入已有的 booking 避免重複 GET）
+                update_booking_status(user_id, "payment_reported", booking)
 
                 date_label = format_date_label(booking["d"])
 
