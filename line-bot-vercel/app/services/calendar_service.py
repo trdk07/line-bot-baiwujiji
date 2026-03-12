@@ -16,10 +16,15 @@ TIMEZONE = "Asia/Taipei"
 TW_TZ = timezone(timedelta(hours=8))
 
 # 工作室營業設定
-WORK_HOURS_START = 13  # 下午 1 點
-WORK_HOURS_END = 21    # 晚上 9 點
-SLOT_DURATION = 60     # 每個時段 60 分鐘
-CLOSED_WEEKDAYS = {0, 6}  # 0=週一, 6=週日 不營業
+# 每週可預約時段（weekday: 0=週一 ~ 6=週日）
+# 每個時段為 (開始時, 開始分, 結束時, 結束分)
+WEEKLY_SLOTS = {
+    1: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週二
+    2: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週三
+    3: [(14, 0, 16, 0), (23, 0, 0, 0)],   # 週四
+    6: [(20, 0, 0, 0)],                     # 週日
+}
+SLOT_DURATION = 60  # 每個時段 60 分鐘
 
 WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -44,55 +49,81 @@ def _get_calendar_service():
         return None
 
 
-def get_next_available_dates(days: int = 9) -> list:
-    """回傳未來可預約的日期（跳過週一和週日），最多 6 個。"""
+def get_next_available_dates(days: int = 14) -> list:
+    """回傳未來可預約的日期（只含有營業時段的星期），最多 6 個。"""
     today = datetime.now(TW_TZ).date()
     dates = []
     for i in range(1, days + 1):
         d = today + timedelta(days=i)
-        if d.weekday() not in CLOSED_WEEKDAYS:
+        if d.weekday() in WEEKLY_SLOTS:
             dates.append(d.strftime("%Y-%m-%d"))
         if len(dates) >= 6:
             break
     return dates
 
 
+def _generate_slot_times(date: datetime) -> list:
+    """根據星期幾產生該日所有可預約的時段起始時間。"""
+    weekday = date.weekday()
+    slot_ranges = WEEKLY_SLOTS.get(weekday, [])
+    if not slot_ranges:
+        return []
+
+    all_slots = []
+    for slot_range in slot_ranges:
+        start_h, start_m = slot_range[0], slot_range[1]
+        end_h, end_m = slot_range[2], slot_range[3]
+
+        # 處理跨午夜（例如 23:00-00:00）
+        start_dt = date.replace(hour=start_h, minute=start_m, second=0, tzinfo=TW_TZ)
+        if end_h == 0 and end_m == 0:
+            end_dt = (date + timedelta(days=1)).replace(hour=0, minute=0, second=0, tzinfo=TW_TZ)
+        else:
+            end_dt = date.replace(hour=end_h, minute=end_m, second=0, tzinfo=TW_TZ)
+
+        current = start_dt
+        while current < end_dt:
+            all_slots.append(current)
+            current += timedelta(minutes=SLOT_DURATION)
+
+    return all_slots
+
+
 def get_available_slots(date_str: str) -> list:
     """
     查詢指定日期的可用時段。
-    回傳: ["13:00", "14:00", "15:00", ...]
+    回傳: ["14:00", "15:00", "23:00", ...]
     """
+    date = datetime.strptime(date_str, "%Y-%m-%d")
+    all_slots = _generate_slot_times(date)
+    if not all_slots:
+        return []
+
     service = _get_calendar_service()
     settings = get_settings()
 
+    # 如果沒有 Google Calendar，直接回傳所有時段
     if not service or not settings.google_calendar_id:
-        return []
+        slot_strs = [s.strftime("%H:%M") for s in all_slots]
+        now = datetime.now(TW_TZ)
+        if date.date() == now.date():
+            current_time = now.strftime("%H:%M")
+            slot_strs = [t for t in slot_strs if t > current_time]
+        return slot_strs
 
     try:
-        date = datetime.strptime(date_str, "%Y-%m-%d")
-        day_start = date.replace(
-            hour=WORK_HOURS_START, minute=0, second=0, tzinfo=TW_TZ
-        )
-        day_end = date.replace(
-            hour=WORK_HOURS_END, minute=0, second=0, tzinfo=TW_TZ
-        )
+        # 查詢範圍：當天最早到隔天凌晨（涵蓋跨午夜時段）
+        query_start = all_slots[0]
+        query_end = all_slots[-1] + timedelta(minutes=SLOT_DURATION)
 
-        # FreeBusy 查詢（會自動避開你行事曆上有事的時段）
         body = {
-            "timeMin": day_start.isoformat(),
-            "timeMax": day_end.isoformat(),
+            "timeMin": query_start.isoformat(),
+            "timeMax": query_end.isoformat(),
             "timeZone": TIMEZONE,
             "items": [{"id": settings.google_calendar_id}],
         }
         result = service.freebusy().query(body=body).execute()
         busy_times = result["calendars"][settings.google_calendar_id]["busy"]
-
-        # 生成所有時段
-        all_slots = []
-        current = day_start
-        while current < day_end:
-            all_slots.append(current)
-            current += timedelta(minutes=SLOT_DURATION)
 
         # 過濾已被佔用的時段
         available = []
