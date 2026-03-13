@@ -47,6 +47,9 @@ def _pipeline(commands: list) -> list:
             json=commands,
             timeout=5.0,
         )
+        if response.status_code != 200:
+            logger.error("KV pipeline HTTP error %d: %s", response.status_code, response.text)
+            return [None] * len(commands)
         return [r.get("result") for r in response.json()]
     except Exception as e:
         logger.error("KV pipeline error: %s", e)
@@ -261,38 +264,53 @@ def get_booking(user_id: str) -> dict:
         return None
 
 
-def update_booking_status(user_id: str, status: str, booking: dict = None):
+def update_booking_status(user_id: str, status: str, booking: dict = None) -> bool:
     """
     更新預約狀態（pending → awaiting_payment → payment_reported）。
     可傳入已讀取的 booking 避免重複 GET。
+    回傳 True 代表寫入成功，False 代表失敗。
     """
     if not booking:
         booking = get_booking(user_id)
     if not booking:
-        return
+        return False
 
     booking["s"] = status
     url = _get_kv_url()
     if not url:
-        return
+        return False
 
     data = json.dumps(booking, ensure_ascii=False)
     try:
-        httpx.post(
+        response = httpx.post(
             url,
             headers=_get_kv_headers(),
             json=["SET", f"booking:{user_id}", data],
             timeout=3.0,
         )
+        if response.status_code != 200:
+            logger.error(
+                "KV SET booking status failed, HTTP %d: %s",
+                response.status_code,
+                response.text,
+            )
+            return False
+        result = response.json()
+        if result.get("result") != "OK":
+            logger.error("KV SET booking status unexpected result: %s", result)
+            return False
+        return True
     except Exception as e:
         logger.error("Update booking status error: %s", e)
+        return False
 
 
 def delete_booking(user_id: str):
-    """刪除預約紀錄並從佇列移除。（1 次 HTTP pipeline）"""
+    """刪除預約紀錄並從佇列移除，同時清除舊版 admin_context 殘留。"""
     _pipeline([
         ["DEL", f"booking:{user_id}"],
         ["LREM", "booking_queue", 0, user_id],
+        ["DEL", "admin_context"],  # 清除舊版殘留，避免殭屍資料
     ])
 
 
@@ -300,6 +318,32 @@ def get_booking_queue() -> list:
     """取得預約佇列中所有 user_id（按先後順序）。"""
     results = _pipeline([["LRANGE", "booking_queue", 0, -1]])
     return results[0] if results[0] else []
+
+
+def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
+    """
+    內部輔助：取得佇列 user_id 列表、對應的 booking 資料，以及 legacy_uid。
+    回傳 (queue, booking_list, legacy_uid)，booking_list 與 queue 等長。
+    只發 2 次 HTTP 請求，避免重複查詢。
+    """
+    base_results = _pipeline([
+        ["LRANGE", "booking_queue", 0, -1],
+        ["GET", "admin_context"],
+    ])
+    original_queue = base_results[0] if base_results[0] else []
+    legacy_uid = base_results[1]  # 舊版 admin_context 中的 user_id
+
+    # 把舊版 admin_context 的 user_id 也加入查詢（如果不在佇列中）
+    queue = list(original_queue)
+    if legacy_uid and legacy_uid not in queue:
+        queue.append(legacy_uid)
+
+    if not queue:
+        return [], [], legacy_uid
+
+    commands = [["GET", f"booking:{uid}"] for uid in queue]
+    booking_jsons = _pipeline(commands)
+    return queue, booking_jsons, legacy_uid
 
 
 def get_queue_bookings_by_status(status: str) -> list:
@@ -310,24 +354,9 @@ def get_queue_bookings_by_status(status: str) -> list:
 
     向下相容：同時檢查舊版 admin_context，處理佇列上線前建立的預約。
     """
-    # 同時取佇列和舊版 admin_context（1 次 pipeline）
-    base_results = _pipeline([
-        ["LRANGE", "booking_queue", 0, -1],
-        ["GET", "admin_context"],
-    ])
-    queue = base_results[0] if base_results[0] else []
-    legacy_uid = base_results[1]  # 舊版 admin_context 中的 user_id
-
-    # 把舊版 admin_context 的 user_id 也加入查詢（如果不在佇列中）
-    if legacy_uid and legacy_uid not in queue:
-        queue.append(legacy_uid)
-
+    queue, booking_jsons, legacy_uid = _fetch_queue_with_bookings()
     if not queue:
         return []
-
-    # 用 pipeline 一次取出所有預約資料
-    commands = [["GET", f"booking:{uid}"] for uid in queue]
-    booking_jsons = _pipeline(commands)
 
     results = []
     for uid, raw in zip(queue, booking_jsons):
@@ -337,11 +366,32 @@ def get_queue_bookings_by_status(status: str) -> list:
                 if booking.get("s") == status:
                     results.append({"user_id": uid, "booking": booking})
                     # 如果是舊版的預約，補加入佇列（自動遷移）
-                    if uid == legacy_uid and uid not in (base_results[0] or []):
+                    if legacy_uid and uid == legacy_uid:
                         _pipeline([
                             ["LREM", "booking_queue", 0, uid],
                             ["RPUSH", "booking_queue", uid],
                         ])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return results
+
+
+def get_all_queue_bookings() -> list:
+    """
+    取得佇列中所有預約（不論狀態）。
+    用於 /list 指令顯示總覽。
+    回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
+    """
+    queue, booking_jsons, _ = _fetch_queue_with_bookings()
+    if not queue:
+        return []
+
+    results = []
+    for uid, raw in zip(queue, booking_jsons):
+        if raw:
+            try:
+                booking = json.loads(raw)
+                results.append({"user_id": uid, "booking": booking})
             except (json.JSONDecodeError, TypeError):
                 pass
     return results
