@@ -307,8 +307,21 @@ def get_queue_bookings_by_status(status: str) -> list:
     取得佇列中指定狀態的預約列表（用 pipeline 批次查詢）。
     回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
     不論佇列多長，只發 2 次 HTTP 請求（1 次取佇列 + 1 次批次取所有預約）。
+
+    向下相容：同時檢查舊版 admin_context，處理佇列上線前建立的預約。
     """
-    queue = get_booking_queue()
+    # 同時取佇列和舊版 admin_context（1 次 pipeline）
+    base_results = _pipeline([
+        ["LRANGE", "booking_queue", 0, -1],
+        ["GET", "admin_context"],
+    ])
+    queue = base_results[0] if base_results[0] else []
+    legacy_uid = base_results[1]  # 舊版 admin_context 中的 user_id
+
+    # 把舊版 admin_context 的 user_id 也加入查詢（如果不在佇列中）
+    if legacy_uid and legacy_uid not in queue:
+        queue.append(legacy_uid)
+
     if not queue:
         return []
 
@@ -323,6 +336,12 @@ def get_queue_bookings_by_status(status: str) -> list:
                 booking = json.loads(raw)
                 if booking.get("s") == status:
                     results.append({"user_id": uid, "booking": booking})
+                    # 如果是舊版的預約，補加入佇列（自動遷移）
+                    if uid == legacy_uid and uid not in (base_results[0] or []):
+                        _pipeline([
+                            ["LREM", "booking_queue", 0, uid],
+                            ["RPUSH", "booking_queue", uid],
+                        ])
             except (json.JSONDecodeError, TypeError):
                 pass
     return results
