@@ -429,7 +429,14 @@ def handle_text_message(event: MessageEvent):
             booking = get_booking(user_id)
             if booking and booking.get("s") == "awaiting_payment":
                 # 更新狀態（傳入已有的 booking 避免重複 GET）
-                update_booking_status(user_id, "payment_reported", booking)
+                ok = update_booking_status(user_id, "payment_reported", booking)
+                if not ok:
+                    # KV 寫入失敗：請客人重試，不發假通知給管理員
+                    reply_text(
+                        event,
+                        "系統暫時忙碌，請稍後再按一次「已匯款」按鈕 🙏"
+                    )
+                    return
 
                 date_label = format_date_label(booking["d"])
 

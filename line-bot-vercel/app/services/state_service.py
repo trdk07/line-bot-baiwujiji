@@ -320,28 +320,30 @@ def get_booking_queue() -> list:
     return results[0] if results[0] else []
 
 
-def _fetch_queue_with_bookings() -> tuple[list, list]:
+def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
     """
-    內部輔助：取得佇列 user_id 列表和對應的 booking 資料。
-    回傳 (queue, booking_list)，booking_list 與 queue 等長。
+    內部輔助：取得佇列 user_id 列表、對應的 booking 資料，以及 legacy_uid。
+    回傳 (queue, booking_list, legacy_uid)，booking_list 與 queue 等長。
+    只發 2 次 HTTP 請求，避免重複查詢。
     """
     base_results = _pipeline([
         ["LRANGE", "booking_queue", 0, -1],
         ["GET", "admin_context"],
     ])
-    queue = base_results[0] if base_results[0] else []
+    original_queue = base_results[0] if base_results[0] else []
     legacy_uid = base_results[1]  # 舊版 admin_context 中的 user_id
 
     # 把舊版 admin_context 的 user_id 也加入查詢（如果不在佇列中）
+    queue = list(original_queue)
     if legacy_uid and legacy_uid not in queue:
         queue.append(legacy_uid)
 
     if not queue:
-        return [], []
+        return [], [], legacy_uid
 
     commands = [["GET", f"booking:{uid}"] for uid in queue]
     booking_jsons = _pipeline(commands)
-    return queue, booking_jsons
+    return queue, booking_jsons, legacy_uid
 
 
 def get_queue_bookings_by_status(status: str) -> list:
@@ -352,17 +354,9 @@ def get_queue_bookings_by_status(status: str) -> list:
 
     向下相容：同時檢查舊版 admin_context，處理佇列上線前建立的預約。
     """
-    queue, booking_jsons = _fetch_queue_with_bookings()
+    queue, booking_jsons, legacy_uid = _fetch_queue_with_bookings()
     if not queue:
         return []
-
-    # 取得原始佇列（用來判斷是否需要遷移）
-    original_queue_results = _pipeline([
-        ["LRANGE", "booking_queue", 0, -1],
-        ["GET", "admin_context"],
-    ])
-    original_queue = original_queue_results[0] or []
-    legacy_uid = original_queue_results[1]
 
     results = []
     for uid, raw in zip(queue, booking_jsons):
@@ -372,7 +366,7 @@ def get_queue_bookings_by_status(status: str) -> list:
                 if booking.get("s") == status:
                     results.append({"user_id": uid, "booking": booking})
                     # 如果是舊版的預約，補加入佇列（自動遷移）
-                    if uid == legacy_uid and uid not in original_queue:
+                    if legacy_uid and uid == legacy_uid:
                         _pipeline([
                             ["LREM", "booking_queue", 0, uid],
                             ["RPUSH", "booking_queue", uid],
@@ -388,7 +382,7 @@ def get_all_queue_bookings() -> list:
     用於 /list 指令顯示總覽。
     回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
     """
-    queue, booking_jsons = _fetch_queue_with_bookings()
+    queue, booking_jsons, _ = _fetch_queue_with_bookings()
     if not queue:
         return []
 
