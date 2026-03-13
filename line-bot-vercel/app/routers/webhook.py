@@ -1,5 +1,5 @@
 """
-LINE Webhook 路由 — Step 4: 預約 + 付款確認三步機制。
+LINE Webhook 路由 — 預約 + 付款確認三步機制。
 
 訊息處理流程：
 [第零層] 管理員指令（/off /on /ok /no /paid /myid）
@@ -11,8 +11,7 @@ LINE Webhook 路由 — Step 4: 預約 + 付款確認三步機制。
   ├── 客人回報匯款：已匯款 → 通知管理員
   ├── 管理員確認收款：/paid → 建立日曆事件 → 通知客人
   └── 其他關鍵字
-[第二層] AI 速率檢查（10 分鐘內最多 5 次）
-[第三層] AI 助理 → Gemini
+[無匹配] 靜默不回應
 """
 
 import re
@@ -38,7 +37,6 @@ from linebot.v3.webhooks import (
 
 from app.config import get_settings
 from app.services.keyword_router import match_keyword
-from app.services.ai_service import ask_ai
 from app.services.notify_service import notify_admin, get_user_name, push_text_to_user, push_flex_to_user
 from app.services.state_service import (
     is_bot_active, set_bot_active,
@@ -46,7 +44,6 @@ from app.services.state_service import (
     has_seen_principles, set_seen_principles,
     save_booking, get_booking, update_booking_status, delete_booking,
     get_queue_bookings_by_status, get_all_queue_bookings,
-    is_ai_rate_limited,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -553,15 +550,5 @@ def handle_text_message(event: MessageEvent):
             handler_func(event, user_text)
             return
 
-    # === 第二層：AI 速率檢查（10 分鐘 5 次上限）===
-    if is_ai_rate_limited(user_id):
-        reply_text(
-            event,
-            "如果需要更多協助，可以輸入「服務項目」了解我們的服務，"
-            "或輸入「找小夏老師」讓老師親自回覆你 🙏"
-        )
-        return
-
-    # === 第三層：AI 助理（花 Token）===
-    ai_reply = ask_ai(user_text)
-    reply_text(event, ai_reply)
+    # === 無匹配：靜默不回應 ===
+    return
