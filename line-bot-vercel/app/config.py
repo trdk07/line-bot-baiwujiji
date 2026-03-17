@@ -15,9 +15,6 @@ class Settings(BaseSettings):
     line_channel_secret: str
     line_channel_access_token: str
 
-    # Google Gemini AI
-    gemini_api_key: str = ""
-
     # 管理員 LINE User ID（用來接收通知）
     admin_line_user_id: str = ""
 
