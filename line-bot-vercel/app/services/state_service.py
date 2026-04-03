@@ -192,13 +192,13 @@ def set_seen_principles(user_id: str):
 
 
 # ============================================================
-# 預約管理（per-user，含狀態追蹤）
+# 預約管理（支援同一用戶多筆預約）
 # ============================================================
-# KV key:   booking:{user_id}
+# KV key:   booking:{user_id|booking_id}  (booking_id = 毫秒時間戳)
 # KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
 #
-# booking_queue: 預約佇列（Redis List），存放所有待處理的 user_id（按時間順序）
-# 每位客人的預約資料仍存在 booking:{user_id}
+# booking_queue: 預約佇列（Redis List），存放 ref（user_id|booking_id），按時間順序
+# 舊版相容：佇列中可能有不含 | 的純 user_id 條目
 
 def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
     """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。"""
@@ -213,25 +213,6 @@ def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
         ["RPUSH", "booking_queue", ref],
     ])
 
-
-def get_booking(user_id: str) -> dict:
-    """取得指定用戶的預約資料。回傳 None 代表沒有。"""
-    url = _get_kv_url()
-    if not url:
-        return None
-
-    try:
-        response = httpx.get(
-            f"{url}/get/booking:{user_id}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        result = response.json().get("result")
-        if not result:
-            return None
-        return json.loads(result)
-    except Exception:
-        return None
 
 
 def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
@@ -299,15 +280,10 @@ def delete_booking(ref: str):
     ])
 
 
-def get_booking_queue() -> list:
-    """取得預約佇列中所有 user_id（按先後順序）。"""
-    results = _pipeline([["LRANGE", "booking_queue", 0, -1]])
-    return results[0] if results[0] else []
-
 
 def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
     """
-    內部輔助：取得佇列 user_id 列表、對應的 booking 資料，以及 legacy_uid。
+    內部輔助：取得佇列 ref 列表、對應的 booking 資料，以及 legacy_uid。
     回傳 (queue, booking_list, legacy_uid)，booking_list 與 queue 等長。
     只發 2 次 HTTP 請求，避免重複查詢。
     """
@@ -334,7 +310,7 @@ def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
 def get_queue_bookings_by_status(status: str) -> list:
     """
     取得佇列中指定狀態的預約列表（用 pipeline 批次查詢）。
-    回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
+    回傳 [{"ref": ..., "user_id": ..., "booking": {...}}, ...]，按佇列順序。
     不論佇列多長，只發 2 次 HTTP 請求（1 次取佇列 + 1 次批次取所有預約）。
 
     向下相容：同時檢查舊版 admin_context，處理佇列上線前建立的預約。
@@ -379,7 +355,7 @@ def get_all_queue_bookings() -> list:
     """
     取得佇列中所有預約（不論狀態）。
     用於 /list 指令顯示總覽。
-    回傳 [{"user_id": ..., "booking": {...}}, ...]，按佇列順序。
+    回傳 [{"ref": ..., "user_id": ..., "booking": {...}}, ...]，按佇列順序。
     """
     queue, booking_jsons, _ = _fetch_queue_with_bookings()
     if not queue:
