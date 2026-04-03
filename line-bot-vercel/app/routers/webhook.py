@@ -11,7 +11,7 @@ LINE Webhook 路由 — 預約 + 付款確認三步機制。
   ├── 客人回報匯款：已匯款 → 通知管理員
   ├── 管理員確認收款：/paid → 建立日曆事件 → 通知客人
   └── 其他關鍵字
-[第二層] 未匹配關鍵字 → 通知老師（人工服務）
+[無匹配] 靜默不回應
 """
 
 import re
@@ -536,6 +536,5 @@ def handle_text_message(event: MessageEvent):
             handler_func(event, user_text)
             return
 
-    # === 第二層：未匹配關鍵字 → 通知老師（人工服務）===
-    reply_text(event, "已通知小夏老師，老師會盡快回覆你，請稍候 🙏")
-    notify_admin(user_id, user_text, reason="未匹配關鍵字")
+    # === 無匹配：靜默不回應 ===
+    return
