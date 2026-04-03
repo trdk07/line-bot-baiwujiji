@@ -146,8 +146,14 @@ def get_available_slots(date_str: str) -> list:
         return available
 
     except Exception as e:
-        logger.error("FreeBusy query error: %s", e)
-        return []
+        logger.error("FreeBusy query error: %s", e, exc_info=True)
+        # API 失敗時降級：回傳所有時段，避免誤顯示「已約滿」
+        slot_strs = [s.strftime("%H:%M") for s in all_slots]
+        now = datetime.now(TW_TZ)
+        if date.date() == now.date():
+            current_time = now.strftime("%H:%M")
+            slot_strs = [t for t in slot_strs if t > current_time]
+        return slot_strs
 
 
 def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
