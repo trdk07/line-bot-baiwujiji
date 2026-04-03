@@ -45,7 +45,7 @@ def _make_text(text: str, size: str = "sm", color: str = TEXT_WHITE, weight: str
 def service_menu() -> dict:
     return {
         "type": "flex",
-        "altText": "百無禁忌工作室 — 服務項目",
+        "altText": "百無禁忌研究所 — 服務項目",
         "contents": {
             "type": "bubble",
             "size": "mega",
@@ -58,7 +58,7 @@ def service_menu() -> dict:
                 "spacing": "lg",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("百無禁忌工作室", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xl", color=GOLD, weight="bold", align="center"),
                     _make_text("— 服務項目 —", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_button("✦ 人生困惑諮詢", "人生困惑諮詢"),
