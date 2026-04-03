@@ -14,6 +14,7 @@ KEYWORD_PATTERNS = [
     (r"^/ok(\s+\d+)?$", "booking_ok"),
     (r"^/no(\s+\d+)?$", "booking_no"),
     (r"^/paid(\s+\d+)?$", "booking_paid"),
+    (r"^/list$", "booking_list"),
     (r"^/myid$", "get_my_id"),
 
     # --- 報到登記（0 Token）---
