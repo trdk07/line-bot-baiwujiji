@@ -42,8 +42,9 @@ from app.services.state_service import (
     is_bot_active, set_bot_active,
     has_been_notified_bot_off, mark_notified_bot_off,
     has_seen_principles, set_seen_principles,
-    save_booking, get_booking, update_booking_status, delete_booking,
+    save_booking, update_booking_status, delete_booking,
     get_queue_bookings_by_status, get_all_queue_bookings,
+    get_user_booking_by_status,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -122,22 +123,23 @@ def _parse_booking_number(text: str) -> int | None:
 def _pick_booking(status: str, number: int | None, event, no_entry_msg: str | None):
     """
     從佇列中挑選指定狀態的預約。
-    - 0 筆 → 若 no_entry_msg 不為 None 則回覆，回傳 (None, None)
+    - 0 筆 → 若 no_entry_msg 不為 None 則回覆，回傳 (None, None, None)
     - 1 筆且沒指定編號 → 自動選
     - 多筆且沒指定編號 → 回覆列表讓管理員選
     - 指定編號 → 選第 N 筆
-    回傳 (user_id, booking) 或 (None, None)（已回覆過訊息）。
+    回傳 (user_id, booking, ref) 或 (None, None, None)（已回覆過訊息）。
     """
     entries = get_queue_bookings_by_status(status)
 
     if not entries:
         if no_entry_msg is not None:
             reply_text(event, no_entry_msg)
-        return None, None
+        return None, None, None
 
     # 只有一筆：直接處理
     if number is None and len(entries) == 1:
-        return entries[0]["user_id"], entries[0]["booking"]
+        e = entries[0]
+        return e["user_id"], e["booking"], e["ref"]
 
     # 多筆但沒指定編號：顯示列表
     if number is None:
@@ -154,15 +156,16 @@ def _pick_booking(status: str, number: int | None, event, no_entry_msg: str | No
         cmd = "/ok" if status == "pending" else "/paid" if status == "payment_reported" else "/no"
         lines.append(f"\n請回覆 {cmd} 加編號，例如 {cmd} 1")
         reply_text(event, "\n".join(lines))
-        return None, None
+        return None, None, None
 
     # 指定編號
     idx = number - 1
     if 0 <= idx < len(entries):
-        return entries[idx]["user_id"], entries[idx]["booking"]
+        e = entries[idx]
+        return e["user_id"], e["booking"], e["ref"]
     else:
         reply_text(event, f"編號 {number} 不存在，目前只有 {len(entries)} 筆。")
-        return None, None
+        return None, None, None
 
 
 # ============================================================
@@ -260,7 +263,7 @@ def handle_text_message(event: MessageEvent):
     if intent == "booking_ok":
         if is_admin(user_id):
             num = _parse_booking_number(user_text)
-            ctx_user, booking = _pick_booking(
+            ctx_user, booking, ref = _pick_booking(
                 "pending", num, event,
                 "目前沒有待確認日期的預約。",
             )
@@ -270,7 +273,7 @@ def handle_text_message(event: MessageEvent):
             date_label = format_date_label(booking["d"])
 
             # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
-            ok = update_booking_status(ctx_user, "awaiting_payment", booking)
+            ok = update_booking_status(ref, "awaiting_payment", booking)
             if not ok:
                 # KV 寫入失敗：立即告知管理員，不繼續後續流程
                 reply_text(
@@ -309,9 +312,9 @@ def handle_text_message(event: MessageEvent):
         if is_admin(user_id):
             num = _parse_booking_number(user_text)
             # 先找 pending，找不到再找 awaiting_payment
-            ctx_user, booking = _pick_booking("pending", num, event, None)
+            ctx_user, booking, ref = _pick_booking("pending", num, event, None)
             if not ctx_user:
-                ctx_user, booking = _pick_booking(
+                ctx_user, booking, ref = _pick_booking(
                     "awaiting_payment", num, event,
                     "目前沒有待處理的預約。",
                 )
@@ -328,7 +331,7 @@ def handle_text_message(event: MessageEvent):
             )
 
             reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約")
-            delete_booking(ctx_user)
+            delete_booking(ref)
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return
@@ -342,10 +345,10 @@ def handle_text_message(event: MessageEvent):
         if is_admin(user_id):
             num = _parse_booking_number(user_text)
             # 先找 payment_reported（正常流程）
-            ctx_user, booking = _pick_booking("payment_reported", num, event, None)
+            ctx_user, booking, ref = _pick_booking("payment_reported", num, event, None)
             if not ctx_user:
                 # Fallback：找 awaiting_payment（KV 寫入失敗或客人未回報的容錯）
-                ctx_user, booking = _pick_booking(
+                ctx_user, booking, ref = _pick_booking(
                     "awaiting_payment", num, event,
                     "目前沒有待確認收款的預約。\n（客人需先回報「已匯款」，或款項尚未確認）",
                 )
@@ -371,7 +374,7 @@ def handle_text_message(event: MessageEvent):
                 f"{date_label} {booking['t']}\n"
                 f"行事曆已建立 📅"
             )
-            delete_booking(ctx_user)
+            delete_booking(ref)
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return
@@ -423,10 +426,11 @@ def handle_text_message(event: MessageEvent):
         # 客人回報：已匯款
         # ----------------------------------------------------------
         if intent == "payment_reported":
-            booking = get_booking(user_id)
-            if booking and booking.get("s") == "awaiting_payment":
+            entry = get_user_booking_by_status(user_id, "awaiting_payment")
+            if entry:
+                ref, booking = entry["ref"], entry["booking"]
                 # 更新狀態（傳入已有的 booking 避免重複 GET）
-                ok = update_booking_status(user_id, "payment_reported", booking)
+                ok = update_booking_status(ref, "payment_reported", booking)
                 if not ok:
                     # KV 寫入失敗：請客人重試，不發假通知給管理員
                     reply_text(
