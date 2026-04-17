@@ -458,11 +458,8 @@ def time_picker_card(date_str: str, slots: list) -> dict:
 # ============================================================
 # 匯款資訊卡片（管理員確認日期後發送給客人）
 # ============================================================
-def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_account: str, account_name: str) -> dict:
-    """顯示匯款資訊，讓客人知道要匯到哪裡。"""
-    bank_name = bank_name or "（請聯繫老師取得）"
-    bank_account = bank_account or "（請聯繫老師取得）"
-
+def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict:
+    """顯示匯款 QR Code，讓客人掃碼完成匯款。"""
     return {
         "type": "flex",
         "altText": "匯款資訊 — 預約日期已確認",
@@ -479,18 +476,23 @@ def payment_info_card(date_label: str, time_str: str, bank_name: str, bank_accou
                     _make_text("日期已確認 ✓", size="xl", color=GOLD, weight="bold", align="center"),
                     _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
-
-                    _make_text("匯款資訊", size="lg", color=GOLD, weight="bold"),
-                    _make_text(f"銀行：{bank_name}", color=TEXT_WHITE),
-                    _make_text(f"帳號：{bank_account}", color=TEXT_WHITE),
-                    _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold"),
+                    _make_text("✦ 匯款資訊", size="lg", color=GOLD, weight="bold", align="center"),
+                    {
+                        "type": "image",
+                        "url": qr_image_url,
+                        "size": "xl",
+                        "aspectMode": "fit",
+                        "aspectRatio": "1:1",
+                        "margin": "md",
+                    },
+                    _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
-
                     _make_text(
-                        "⚠️ 匯款完成後，請務必按下方「已匯款」按鈕或輸入「已匯款」通知我們，預約才算正式成立。",
+                        "⚠️ 匯款完成後，請按下方「已匯款」按鈕通知我們，預約才算正式成立。",
                         color=TEXT_WHITE,
                     ),
                     _make_button("✦ 已匯款", "已匯款"),
+                    _make_text("百無禁忌研究所", size="xs", color=TEXT_GREY, align="center"),
                 ],
             },
         },
