@@ -486,9 +486,10 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                         "margin": "md",
                     },
                     _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
+                    _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text(
-                        "⚠️ 匯款完成後，請按下方「已匯款」按鈕通知我們，預約才算正式成立。",
+                        "⚠️ 匯款完成後，請務必按下方「已匯款」按鈕通知我們，預約才算成立。",
                         color=TEXT_WHITE,
                     ),
                     _make_button("✦ 已匯款", "已匯款"),
