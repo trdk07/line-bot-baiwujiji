@@ -283,15 +283,13 @@ def handle_text_message(event: MessageEvent):
                 )
                 return
 
-            # 推送匯款資訊卡片給客人
+            # 推送匯款 QR Code 卡片給客人
             push_flex_to_user(
                 ctx_user,
                 fm.payment_info_card(
                     date_label,
                     booking["t"],
-                    settings.payment_bank_name,
-                    settings.payment_bank_account,
-                    settings.payment_account_name,
+                    settings.payment_qr_image_url,
                 ),
             )
 
