@@ -480,7 +480,7 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                     {
                         "type": "image",
                         "url": qr_image_url,
-                        "size": "xl",
+                        "size": "full",
                         "aspectMode": "fit",
                         "aspectRatio": "1:1",
                         "margin": "md",
