@@ -403,6 +403,24 @@ def handle_text_message(event: MessageEvent):
             reply_text(event, "只有管理員可以使用這個指令。")
         return
 
+    # ----------------------------------------------------------
+    # 管理員 /clear：一次清除所有預約
+    # ----------------------------------------------------------
+    if intent == "booking_clear":
+        if is_admin(user_id):
+            all_bookings = get_all_queue_bookings()
+            if not all_bookings:
+                reply_text(event, "📋 目前沒有任何預約需要清除。")
+                return
+
+            count = len(all_bookings)
+            for e in all_bookings:
+                delete_booking(e["ref"])
+            reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
     # === Bot 開關檢查 ===
     if not is_bot_active():
         if not is_admin(user_id):
