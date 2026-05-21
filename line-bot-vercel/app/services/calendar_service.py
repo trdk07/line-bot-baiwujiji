@@ -184,7 +184,7 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
         return True
 
     except Exception as e:
-        logger.error("Calendar create event error: %s", e)
+        logger.error("Calendar create event error: %s", e, exc_info=True)
         return False
 
 

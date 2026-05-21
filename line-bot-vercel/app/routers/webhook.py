@@ -356,7 +356,7 @@ def handle_text_message(event: MessageEvent):
             date_label = format_date_label(booking["d"])
 
             # 建立 Google Calendar 事件
-            create_event(booking["d"], booking["t"], booking["n"])
+            cal_ok = create_event(booking["d"], booking["t"], booking["n"])
 
             # 通知客人：預約完成
             push_text_to_user(
@@ -366,11 +366,12 @@ def handle_text_message(event: MessageEvent):
                 f"期待為您服務 🙏"
             )
 
+            cal_status = "行事曆已建立 📅" if cal_ok else "⚠️ 行事曆建立失敗，請手動新增"
             reply_text(
                 event,
                 f"✅ 已完成 {booking['n']} 的預約\n"
                 f"{date_label} {booking['t']}\n"
-                f"行事曆已建立 📅"
+                f"{cal_status}"
             )
             delete_booking(ref)
         else:
