@@ -33,6 +33,10 @@ def _get_calendar_service():
     """建立 Google Calendar API 連線。"""
     settings = get_settings()
     if not settings.google_service_account_json:
+        print("[Calendar] GOOGLE_SERVICE_ACCOUNT_JSON 未設定，跳過行事曆")
+        return None
+    if not settings.google_calendar_id:
+        print("[Calendar] GOOGLE_CALENDAR_ID 未設定，跳過行事曆")
         return None
     try:
         from google.oauth2.service_account import Credentials
@@ -43,9 +47,12 @@ def _get_calendar_service():
             creds_info,
             scopes=["https://www.googleapis.com/auth/calendar"],
         )
-        return build("calendar", "v3", credentials=creds)
+        service = build("calendar", "v3", credentials=creds)
+        print("[Calendar] 服務初始化成功")
+        return service
     except Exception as e:
-        logger.error("Calendar service init failed: %s", e)
+        print(f"[Calendar] 服務初始化失敗: {e}")
+        logger.error("Calendar service init failed: %s", e, exc_info=True)
         return None
 
 
@@ -175,15 +182,17 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
             "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
         }
 
-        service.events().insert(
+        result = service.events().insert(
             calendarId=settings.google_calendar_id,
             body=event,
         ).execute()
 
+        print(f"[Calendar] 事件建立成功: {result.get('id')} {date_str} {time_str} {customer_name}")
         logger.info("Event created: %s %s %s", date_str, time_str, customer_name)
         return True
 
     except Exception as e:
+        print(f"[Calendar] 事件建立失敗: {type(e).__name__}: {e}")
         logger.error("Calendar create event error: %s", e, exc_info=True)
         return False
 
