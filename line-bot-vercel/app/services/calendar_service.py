@@ -30,10 +30,12 @@ WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
 
 def _get_calendar_service():
-    """建立 Google Calendar API 連線。"""
+    """建立 Google Calendar API 連線。回傳 (service, error_msg)。"""
     settings = get_settings()
     if not settings.google_service_account_json:
-        return None
+        return None, "GOOGLE_SERVICE_ACCOUNT_JSON 未設定"
+    if not settings.google_calendar_id:
+        return None, "GOOGLE_CALENDAR_ID 未設定"
     try:
         from google.oauth2.service_account import Credentials
         from googleapiclient.discovery import build
@@ -46,10 +48,15 @@ def _get_calendar_service():
             creds_info,
             scopes=["https://www.googleapis.com/auth/calendar"],
         )
-        return build("calendar", "v3", credentials=creds)
+        return build("calendar", "v3", credentials=creds), None
+    except json.JSONDecodeError as e:
+        msg = f"JSON 格式錯誤：{e}"
+        logger.error("Calendar service init failed: %s", msg)
+        return None, msg
     except Exception as e:
-        logger.error("Calendar service init failed: %s", e)
-        return None
+        msg = f"認證建立失敗：{e}"
+        logger.error("Calendar service init failed: %s", msg)
+        return None, msg
 
 
 def get_next_available_dates(days: int = 14) -> list:
@@ -103,7 +110,7 @@ def get_available_slots(date_str: str) -> list:
     if not all_slots:
         return []
 
-    service = _get_calendar_service()
+    service, _ = _get_calendar_service()
     settings = get_settings()
 
     # 如果沒有 Google Calendar，直接回傳所有時段
@@ -159,13 +166,13 @@ def get_available_slots(date_str: str) -> list:
         return slot_strs
 
 
-def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
-    """在 Google Calendar 建立預約事件。"""
-    service = _get_calendar_service()
+def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str]:
+    """在 Google Calendar 建立預約事件。回傳 (成功與否, 錯誤訊息)。"""
+    service, init_error = _get_calendar_service()
     settings = get_settings()
 
-    if not service or not settings.google_calendar_id:
-        return False
+    if not service:
+        return False, init_error or "無法建立 Calendar 服務"
 
     try:
         start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
@@ -184,11 +191,12 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> bool:
         ).execute()
 
         logger.info("Event created: %s %s %s", date_str, time_str, customer_name)
-        return True
+        return True, ""
 
     except Exception as e:
-        logger.error("Calendar create event error: %s", e, exc_info=True)
-        return False
+        msg = str(e)
+        logger.error("Calendar create event error: %s", msg, exc_info=True)
+        return False, msg
 
 
 def format_date_label(date_str: str) -> str:
