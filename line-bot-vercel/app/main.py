@@ -70,16 +70,40 @@ async def debug_calendar():
         return result
     result["service_build"] = "OK"
 
-    # 4. 嘗試查詢行事曆
+    # 4. 嘗試查詢行事曆（讀取測試）
     if settings.google_calendar_id:
         try:
-            from googleapiclient.errors import HttpError
             cal = service.calendars().get(calendarId=settings.google_calendar_id).execute()
-            result["calendar_access"] = "OK"
+            result["calendar_read"] = "OK"
             result["calendar_name"] = cal.get("summary", "(未知)")
         except Exception as e:
-            result["calendar_access"] = f"失敗：{e}"
+            result["calendar_read"] = f"失敗：{e}"
+            return result
     else:
-        result["calendar_access"] = "跳過（GOOGLE_CALENDAR_ID 未設定）"
+        result["calendar_read"] = "跳過（GOOGLE_CALENDAR_ID 未設定）"
+        return result
+
+    # 5. 嘗試寫入測試事件（寫入測試）
+    try:
+        from datetime import datetime, timedelta, timezone
+        TW_TZ = timezone(timedelta(hours=8))
+        now = datetime.now(TW_TZ)
+        test_event = {
+            "summary": "【診斷測試】請忽略此事件",
+            "start": {"dateTime": now.isoformat(), "timeZone": "Asia/Taipei"},
+            "end": {"dateTime": (now + timedelta(minutes=1)).isoformat(), "timeZone": "Asia/Taipei"},
+        }
+        created = service.events().insert(
+            calendarId=settings.google_calendar_id,
+            body=test_event,
+        ).execute()
+        # 成功後立刻刪除
+        service.events().delete(
+            calendarId=settings.google_calendar_id,
+            eventId=created["id"],
+        ).execute()
+        result["calendar_write"] = "OK"
+    except Exception as e:
+        result["calendar_write"] = f"失敗：{e}"
 
     return result
