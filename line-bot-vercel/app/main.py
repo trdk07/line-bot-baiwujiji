@@ -63,26 +63,17 @@ async def debug_calendar():
         return result
 
     # 3. 嘗試建立 Calendar 服務
-    try:
-        from google.oauth2.service_account import Credentials
-        from googleapiclient.discovery import build
-
-        if "private_key" in creds_info:
-            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-
-        creds = Credentials.from_service_account_info(
-            creds_info,
-            scopes=["https://www.googleapis.com/auth/calendar"],
-        )
-        service = build("calendar", "v3", credentials=creds)
-        result["service_build"] = "OK"
-    except Exception as e:
-        result["service_build"] = f"失敗：{e}"
+    from app.services.calendar_service import _get_calendar_service
+    service, init_error = _get_calendar_service()
+    if not service:
+        result["service_build"] = f"失敗：{init_error}"
         return result
+    result["service_build"] = "OK"
 
     # 4. 嘗試查詢行事曆
     if settings.google_calendar_id:
         try:
+            from googleapiclient.errors import HttpError
             cal = service.calendars().get(calendarId=settings.google_calendar_id).execute()
             result["calendar_access"] = "OK"
             result["calendar_name"] = cal.get("summary", "(未知)")
