@@ -39,6 +39,9 @@ def _get_calendar_service():
         from googleapiclient.discovery import build
 
         creds_info = json.loads(settings.google_service_account_json)
+        # Vercel 環境變數可能將 private_key 裡的 \n 存成 \\n，這裡自動修正
+        if "private_key" in creds_info:
+            creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
         creds = Credentials.from_service_account_info(
             creds_info,
             scopes=["https://www.googleapis.com/auth/calendar"],
