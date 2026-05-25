@@ -447,6 +447,7 @@ def time_picker_card(date_str: str, slots: list) -> dict:
                 "contents": [
                     _make_text("選擇時段", size="xl", color=GOLD, weight="bold", align="center"),
                     _make_text(date_label, size="lg", color=TEXT_WHITE, weight="bold", align="center"),
+                    _make_text("每個時段 60 分鐘", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     *buttons,
                 ],
