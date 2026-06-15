@@ -166,17 +166,15 @@ def get_available_slots(date_str: str) -> list:
         return slot_strs
 
 
-def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str]:
-    """在 Google Calendar 建立預約事件。回傳 (成功與否, 錯誤訊息)。"""
+def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str, str]:
+    """在 Google Calendar 建立預約事件。回傳 (成功與否, 錯誤訊息, 事件ID)。"""
     service, init_error = _get_calendar_service()
     settings = get_settings()
 
     if not service:
-        return False, init_error or "無法建立 Calendar 服務"
+        return False, init_error or "無法建立 Calendar 服務", ""
 
     try:
-        # 用 _generate_slot_times 取得正確的 datetime，
-        # 避免跨午夜時段（如 23:00-01:00 的 00:00）被錯誤解析為當天凌晨。
         date = datetime.strptime(date_str, "%Y-%m-%d")
         all_slots = _generate_slot_times(date)
         matching = [s for s in all_slots if s.strftime("%H:%M") == time_str]
@@ -194,17 +192,57 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool
             "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
         }
 
-        service.events().insert(
+        created = service.events().insert(
             calendarId=settings.google_calendar_id,
             body=event,
         ).execute()
 
         logger.info("Event created: %s %s %s", date_str, time_str, customer_name)
-        return True, ""
+        return True, "", created.get("id", "")
 
     except Exception as e:
         msg = str(e)
         logger.error("Calendar create event error: %s", msg, exc_info=True)
+        return False, msg, ""
+
+
+def update_event(event_id: str, date_str: str, time_str: str, customer_name: str) -> tuple[bool, str]:
+    """更新 Google Calendar 事件的時間。回傳 (成功與否, 錯誤訊息)。"""
+    service, init_error = _get_calendar_service()
+    settings = get_settings()
+
+    if not service:
+        return False, init_error or "無法建立 Calendar 服務"
+
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+        all_slots = _generate_slot_times(date)
+        matching = [s for s in all_slots if s.strftime("%H:%M") == time_str]
+        if matching:
+            start_dt = matching[0]
+        else:
+            start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            start_dt = start_dt.replace(tzinfo=TW_TZ)
+
+        end_dt = start_dt + timedelta(minutes=SLOT_DURATION)
+
+        patch_body = {
+            "summary": f"【預約】{customer_name}",
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
+        }
+        service.events().patch(
+            calendarId=settings.google_calendar_id,
+            eventId=event_id,
+            body=patch_body,
+        ).execute()
+
+        logger.info("Event updated: %s %s %s", date_str, time_str, customer_name)
+        return True, ""
+
+    except Exception as e:
+        msg = str(e)
+        logger.error("Calendar update event error: %s", msg, exc_info=True)
         return False, msg
 
 

@@ -45,11 +45,14 @@ from app.services.state_service import (
     save_booking, update_booking_status, delete_booking,
     get_queue_bookings_by_status, get_all_queue_bookings,
     get_user_booking_by_status,
+    save_done_booking, get_all_done_bookings,
+    update_booking_datetime, update_done_booking_datetime,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
     get_available_slots,
     create_event,
+    update_event,
     format_date_label,
 )
 from app.templates import flex_messages as fm
@@ -356,15 +359,17 @@ def handle_text_message(event: MessageEvent):
             date_label = format_date_label(booking["d"])
 
             # 建立 Google Calendar 事件
-            cal_ok, cal_error = create_event(booking["d"], booking["t"], booking["n"])
+            cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
 
-            # 通知客人：預約完成
-            push_text_to_user(
+            # 通知客人：預約確認卡片
+            push_flex_to_user(
                 ctx_user,
-                f"您的預約已完成確認 🎉\n\n"
-                f"📅 {date_label} {booking['t']}\n\n"
-                f"期待為您服務 🙏"
+                fm.booking_confirmed_card(booking["n"], date_label, booking["t"]),
             )
+
+            # 完成後存入 done 區（供改期使用）
+            save_done_booking(ref, booking, cal_event_id)
+            delete_booking(ref)
 
             if cal_ok:
                 cal_status = "行事曆已建立 📅"
@@ -376,7 +381,6 @@ def handle_text_message(event: MessageEvent):
                 f"{date_label} {booking['t']}\n"
                 f"{cal_status}"
             )
-            delete_booking(ref)
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return
@@ -421,6 +425,95 @@ def handle_text_message(event: MessageEvent):
             for e in all_bookings:
                 delete_booking(e["ref"])
             reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")
+        else:
+            reply_text(event, "只有管理員可以使用這個指令。")
+        return
+
+    # ----------------------------------------------------------
+    # 管理員 /change：改期（付款前後皆可）
+    # ----------------------------------------------------------
+    if intent == "booking_change":
+        if is_admin(user_id):
+            m = re.search(
+                r"/change\s+(?:(\d+)\s+)?(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
+                user_text,
+            )
+            if not m:
+                reply_text(
+                    event,
+                    "格式錯誤，請用：\n"
+                    "/change YYYY-MM-DD HH:MM\n"
+                    "或指定編號：/change 1 YYYY-MM-DD HH:MM",
+                )
+                return
+
+            num_str, new_date, new_time = m.group(1), m.group(2), m.group(3)
+            num = int(num_str) if num_str else None
+
+            all_active = get_all_queue_bookings()
+            all_done = get_all_done_bookings()
+            all_entries = all_active + all_done
+
+            if not all_entries:
+                reply_text(event, "目前沒有任何預約可以改期。")
+                return
+
+            STATUS_ICON = {
+                "pending": "⏳", "awaiting_payment": "💳",
+                "payment_reported": "💰", "done": "✅",
+            }
+
+            if num is None and len(all_entries) == 1:
+                entry = all_entries[0]
+            elif num is None:
+                lines = [f"目前有 {len(all_entries)} 筆預約，請加編號：\n"]
+                for i, e in enumerate(all_entries, 1):
+                    b = e["booking"]
+                    icon = STATUS_ICON.get(b["s"], "")
+                    lines.append(f"  {i}. {b['n']}｜{format_date_label(b['d'])} {b['t']} {icon}")
+                lines.append(f"\n例如：/change 1 {new_date} {new_time}")
+                reply_text(event, "\n".join(lines))
+                return
+            else:
+                idx = num - 1
+                if 0 <= idx < len(all_entries):
+                    entry = all_entries[idx]
+                else:
+                    reply_text(event, f"編號 {num} 不存在，目前只有 {len(all_entries)} 筆。")
+                    return
+
+            booking = entry["booking"]
+            ref = entry["ref"]
+            ctx_user = entry["user_id"]
+            is_done = booking.get("s") == "done"
+
+            old_date_label = format_date_label(booking["d"])
+            old_time = booking["t"]
+            new_date_label = format_date_label(new_date)
+
+            if is_done:
+                ok = update_done_booking_datetime(ref, new_date, new_time, booking)
+            else:
+                ok = update_booking_datetime(ref, new_date, new_time, booking)
+
+            if not ok:
+                reply_text(event, "⚠️ 系統錯誤：預約時間更新失敗，請稍後再試。")
+                return
+
+            cal_status = ""
+            if is_done and booking.get("cal_id"):
+                cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
+                cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
+
+            push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
+
+            reply_text(
+                event,
+                f"✅ 已改期 {booking['n']}\n"
+                f"原：{old_date_label} {old_time}\n"
+                f"新：{new_date_label} {new_time}"
+                f"{cal_status}",
+            )
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
         return

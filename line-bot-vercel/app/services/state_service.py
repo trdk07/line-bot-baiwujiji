@@ -351,6 +351,92 @@ def get_user_booking_by_status(user_id: str, status: str) -> dict | None:
             return entry
     return None
 
+DONE_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
+
+
+def save_done_booking(ref: str, booking: dict, cal_event_id: str):
+    """預約完成後存入 done 區，保留 30 天供改期使用。"""
+    done_data = {**booking, "s": "done", "cal_id": cal_event_id}
+    data = json.dumps(done_data, ensure_ascii=False)
+    _pipeline([
+        ["SET", f"done:{ref}", data, "EX", DONE_TTL],
+        ["RPUSH", "done_queue", ref],
+    ])
+
+
+def get_all_done_bookings() -> list:
+    """取得所有完成的預約（30 天內）。"""
+    url = _get_kv_url()
+    if not url:
+        return []
+    try:
+        resp = httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["LRANGE", "done_queue", 0, -1], timeout=3.0,
+        )
+        refs = resp.json().get("result") or []
+    except Exception:
+        return []
+    if not refs:
+        return []
+
+    raws = _pipeline([["GET", f"done:{ref}"] for ref in refs])
+    results, stale = [], []
+    for ref, raw in zip(refs, raws):
+        if raw:
+            try:
+                results.append({
+                    "ref": ref,
+                    "user_id": _entry_user_id(ref),
+                    "booking": json.loads(raw),
+                })
+            except (json.JSONDecodeError, TypeError):
+                stale.append(ref)
+        else:
+            stale.append(ref)
+    if stale:
+        _pipeline([["LREM", "done_queue", 0, r] for r in stale])
+    return results
+
+
+def update_booking_datetime(ref: str, date_str: str, time_str: str, booking: dict) -> bool:
+    """更新進行中預約的日期和時間。"""
+    booking["d"] = date_str
+    booking["t"] = time_str
+    url = _get_kv_url()
+    if not url:
+        return False
+    data = json.dumps(booking, ensure_ascii=False)
+    try:
+        resp = httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["SET", f"booking:{ref}", data], timeout=3.0,
+        )
+        return resp.json().get("result") == "OK"
+    except Exception as e:
+        logger.error("update_booking_datetime error: %s", e)
+        return False
+
+
+def update_done_booking_datetime(ref: str, date_str: str, time_str: str, booking: dict) -> bool:
+    """更新已完成預約的日期和時間（重設 30 天 TTL）。"""
+    booking["d"] = date_str
+    booking["t"] = time_str
+    url = _get_kv_url()
+    if not url:
+        return False
+    data = json.dumps(booking, ensure_ascii=False)
+    try:
+        resp = httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["SET", f"done:{ref}", data, "EX", DONE_TTL], timeout=3.0,
+        )
+        return resp.json().get("result") == "OK"
+    except Exception as e:
+        logger.error("update_done_booking_datetime error: %s", e)
+        return False
+
+
 def get_all_queue_bookings() -> list:
     """
     取得佇列中所有預約（不論狀態）。
