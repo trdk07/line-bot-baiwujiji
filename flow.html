@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百無禁忌 LINE Bot — 流程總覽</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #111; color: #eee; font-family: 'Segoe UI', sans-serif; padding: 32px 16px; }
+  h1 { color: #C9A962; text-align: center; font-size: 1.8rem; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #888; margin-bottom: 40px; font-size: 0.95rem; }
+  h2 { color: #C9A962; font-size: 1.1rem; margin-bottom: 14px; border-left: 3px solid #C9A962; padding-left: 10px; }
+  .section { background: #1B1B1B; border: 1px solid #333; border-radius: 12px; padding: 24px; margin-bottom: 28px; max-width: 960px; margin-left: auto; margin-right: auto; }
+  .mermaid { background: #1e1e1e; border-radius: 8px; padding: 16px; overflow-x: auto; }
+
+  /* State badges */
+  .states { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+  .badge { padding: 5px 14px; border-radius: 20px; font-size: 0.82rem; font-weight: bold; }
+  .b-pending     { background:#2c2c00; color:#f5c518; border:1px solid #f5c518; }
+  .b-await       { background:#001f3f; color:#74b9ff; border:1px solid #74b9ff; }
+  .b-reported    { background:#003320; color:#55efc4; border:1px solid #55efc4; }
+  .b-done        { background:#1e0033; color:#a29bfe; border:1px solid #a29bfe; }
+
+  /* Command table */
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 8px; }
+  th { background: #2a2a2a; color: #C9A962; padding: 8px 12px; text-align: left; }
+  td { padding: 8px 12px; border-top: 1px solid #2a2a2a; color: #ccc; vertical-align: top; }
+  td:first-child { color: #7ecfff; font-family: monospace; white-space: nowrap; }
+  tr:hover td { background: #222; }
+
+  /* Component grid */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-top: 8px; }
+  .card { background: #222; border: 1px solid #333; border-radius: 8px; padding: 14px; }
+  .card-title { color: #C9A962; font-weight: bold; margin-bottom: 6px; font-size: 0.9rem; }
+  .card-body { color: #999; font-size: 0.82rem; line-height: 1.6; }
+
+  .tag { display:inline-block; background:#2a2a2a; color:#aaa; border-radius:4px; padding:1px 7px; font-size:0.78rem; margin:2px 2px 0 0; }
+</style>
+</head>
+<body>
+
+<h1>百無禁忌 LINE Bot</h1>
+<p class="subtitle">流程 · 狀態 · 指令 · 系統架構 一覽</p>
+
+<!-- ① 客人完整流程 -->
+<div class="section">
+  <h2>① 客人預約流程</h2>
+  <div class="mermaid">
+flowchart TD
+    A([加好友]) --> B[收到歡迎訊息]
+    B --> C[輸入：我要預約]
+    C --> D{首次預約？}
+    D -- 是 --> E[顯示原則說明卡片]
+    E --> F[再次輸入：我要預約]
+    D -- 否 --> F
+    F --> G[選擇日期\n日期選擇卡片]
+    G --> H[選擇時段\n時段選擇卡片\n每格 60 分鐘]
+    H --> I[送出預約申請\n通知老師]
+    I --> J[等待老師確認]
+    J --> K{老師回覆}
+    K -- /no 婉拒 --> L[收到婉拒通知\n可重新預約]
+    K -- /ok 確認 --> M[收到匯款 QR Code 卡片\nNT$3,600]
+    M --> N[完成匯款]
+    N --> O[輸入：已匯款]
+    O --> P[等待老師確認收款]
+    P --> Q{老師回覆}
+    Q -- /no 婉拒 --> L
+    Q -- /paid 確認 --> R[收到預約確認卡片\n含姓名·日期·時段·60分鐘]
+    R --> S([預約完成 ✓])
+    S --> T{後續改期？}
+    T -- /change 改期 --> U[收到改期通知卡片]
+    U --> S
+
+    style A fill:#1a3a1a,stroke:#55efc4,color:#55efc4
+    style S fill:#1a1a3a,stroke:#a29bfe,color:#a29bfe
+    style L fill:#3a1a1a,stroke:#ff7675,color:#ff7675
+    style R fill:#2a2a00,stroke:#C9A962,color:#C9A962
+  </div>
+</div>
+
+<!-- ② 預約狀態機 -->
+<div class="section">
+  <h2>② 預約狀態流轉（KV 儲存）</h2>
+  <div class="mermaid">
+stateDiagram-v2
+    direction LR
+    [*] --> pending : 客人選完時段\nsave_booking()
+    pending --> awaiting_payment : 管理員 /ok\n發匯款資訊給客人
+    pending --> [*] : 管理員 /no\n刪除預約
+    awaiting_payment --> payment_reported : 客人輸入「已匯款」\n通知管理員
+    awaiting_payment --> [*] : 管理員 /no\n刪除預約
+    payment_reported --> done : 管理員 /paid\n建立行事曆事件\n發確認卡片給客人
+    payment_reported --> [*] : 管理員 /no
+    done --> done : 管理員 /change\n更新時間＋行事曆\n發改期卡片給客人
+    done --> [*] : 30 天後自動過期
+  </div>
+  <div class="states" style="margin-top:16px;">
+    <span class="badge b-pending">⏳ pending　待確認日期</span>
+    <span class="badge b-await">💳 awaiting_payment　待匯款</span>
+    <span class="badge b-reported">💰 payment_reported　已回報匯款</span>
+    <span class="badge b-done">✅ done　完成（保留 30 天）</span>
+  </div>
+</div>
+
+<!-- ③ 管理員指令 -->
+<div class="section">
+  <h2>③ 管理員指令一覽</h2>
+  <table>
+    <tr><th>指令</th><th>功能</th><th>觸發動作</th></tr>
+    <tr>
+      <td>/ok [編號]</td>
+      <td>確認預約日期</td>
+      <td>狀態 pending → awaiting_payment，發匯款 QR Code 給客人</td>
+    </tr>
+    <tr>
+      <td>/no [編號]</td>
+      <td>婉拒預約</td>
+      <td>刪除預約，通知客人可重新選擇</td>
+    </tr>
+    <tr>
+      <td>/paid [編號]</td>
+      <td>確認收款完成</td>
+      <td>建立 Google Calendar 事件，發確認 Flex 卡片，保留 done 紀錄 30 天</td>
+    </tr>
+    <tr>
+      <td>/change [編號] YYYY-MM-DD HH:MM</td>
+      <td>改期</td>
+      <td>更新 KV 時間；若已付款則同步更新 Google Calendar；發改期卡片給客人</td>
+    </tr>
+    <tr>
+      <td>/list</td>
+      <td>列出所有進行中預約</td>
+      <td>顯示 pending / awaiting_payment / payment_reported 全部</td>
+    </tr>
+    <tr>
+      <td>/clear</td>
+      <td>清除所有進行中預約</td>
+      <td>一次刪除佇列中所有預約</td>
+    </tr>
+    <tr>
+      <td>/off / /on</td>
+      <td>Bot 開關</td>
+      <td>關閉時客人傳訊會收到「老師在線上」提示（每次關閉期間每人只提示一次）</td>
+    </tr>
+    <tr>
+      <td>/myid</td>
+      <td>查詢自己的 LINE User ID</td>
+      <td>回覆 User ID（用於設定 ADMIN_LINE_USER_ID 環境變數）</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ④ 可預約時段 -->
+<div class="section">
+  <h2>④ 可預約時段設定</h2>
+  <div class="mermaid">
+block-beta
+  columns 7
+  block:mon["週一"]:1
+    m1["15:00"] m2["16:00"] m3["19:00"] m4["23:00"]
+  end
+  block:tue["週二"]:1
+    t1["15:00"] t2["16:00"] t3["19:00"] t4["23:00"]
+  end
+  space:1
+  block:thu["週四"]:1
+    th1["15:00"] th2["16:00"] th3["19:00"] th4["23:00"]
+  end
+  space:2
+  block:sun["週日"]:1
+    s1["20:00"] s2["21:00"] s3["22:00"] s4["23:00"] s5["00:00\n(隔天)"]
+  end
+  </div>
+  <p style="color:#888;font-size:0.82rem;margin-top:12px;">每格 60 分鐘，Google Calendar freebusy 查詢自動過濾已被佔用的時段。跨午夜時段（23:00 → 00:00）以隔天日期寫入行事曆。</p>
+</div>
+
+<!-- ⑤ 系統架構 -->
+<div class="section">
+  <h2>⑤ 系統架構</h2>
+  <div class="mermaid">
+flowchart LR
+    LINE["LINE\nMessaging API"]
+    VERCEL["Vercel\nServerless\nPython / FastAPI"]
+    KV["Upstash Redis\nKV 狀態儲存"]
+    CAL["Google Calendar\nAPI"]
+    ADMIN["管理員\nLINE"]
+    USER["客人\nLINE"]
+
+    USER -- Webhook POST /callback --> VERCEL
+    ADMIN -- Webhook POST /callback --> VERCEL
+    VERCEL -- Reply / Push --> LINE
+    LINE --> USER
+    LINE --> ADMIN
+    VERCEL -- GET/SET --> KV
+    VERCEL -- events.insert / patch --> CAL
+  </div>
+  <div class="grid" style="margin-top:16px;">
+    <div class="card">
+      <div class="card-title">LINE Messaging API</div>
+      <div class="card-body">
+        接收 Webhook 事件<br>
+        Reply Token（即時回覆）<br>
+        Push API（主動推播）<br>
+        Flex Message 卡片
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Vercel Serverless</div>
+      <div class="card-body">
+        Python 3 + FastAPI<br>
+        <span class="tag">api/index.py</span><br>
+        <span class="tag">app/routers/webhook.py</span><br>
+        <span class="tag">app/services/</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Upstash Redis (KV)</div>
+      <div class="card-body">
+        Bot 開關狀態<br>
+        預約佇列 booking_queue<br>
+        預約資料 booking:{ref}<br>
+        完成紀錄 done:{ref}（30天）
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Google Calendar</div>
+      <div class="card-body">
+        Service Account 認證<br>
+        freebusy 查詢空檔<br>
+        events.insert 建立<br>
+        events.patch 改期
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑥ 關鍵字路由 -->
+<div class="section">
+  <h2>⑥ 訊息路由邏輯</h2>
+  <div class="mermaid">
+flowchart TD
+    MSG([收到訊息]) --> Z0{是管理員？\n且為管理員指令？}
+    Z0 -- 是 --> ADMIN_CMD[執行管理員指令\n/ok /no /paid /change\n/list /clear /off /on /myid]
+    Z0 -- 否 --> Z1{Bot 開啟中？}
+    Z1 -- 關閉且非管理員 --> OFFLINE[靜默 or\n一次性提示\n老師在線上]
+    Z1 -- 開啟 --> KW{關鍵字比對}
+    KW -- 匹配 --> INTENT[執行對應意圖\n預約流程 / 服務介紹\n找老師 / 已匯款...]
+    KW -- 無匹配 --> SILENT[靜默不回應]
+
+    style ADMIN_CMD fill:#1a2a3a,stroke:#74b9ff,color:#74b9ff
+    style INTENT fill:#1a3a1a,stroke:#55efc4,color:#55efc4
+    style SILENT fill:#2a2a2a,stroke:#555,color:#888
+  </div>
+</div>
+
+<p style="text-align:center;color:#444;font-size:0.78rem;margin-top:32px;">百無禁忌研究所 LINE Bot — 流程文件</p>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#2a2a2a',
+      primaryTextColor: '#eee',
+      primaryBorderColor: '#C9A962',
+      lineColor: '#C9A962',
+      secondaryColor: '#1B1B1B',
+      tertiaryColor: '#111',
+      edgeLabelBackground: '#1B1B1B',
+    }
+  });
+</script>
+</body>
+</html>
