@@ -47,6 +47,7 @@ from app.services.state_service import (
     get_user_booking_by_status,
     save_done_booking, get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
+    set_intake_pending, has_intake_pending, clear_intake_pending,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -169,6 +170,32 @@ def _pick_booking(status: str, number: int | None, event, no_entry_msg: str | No
     else:
         reply_text(event, f"編號 {number} 不存在，目前只有 {len(entries)} 筆。")
         return None, None, None
+
+
+def _parse_intake_text(text: str) -> tuple[str, str, str]:
+    """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
+    優先比對 1. / 1- / 1、格式，找不到就按行分割。
+    """
+    name_m = re.search(r"1[.\-、．]\s*(.+?)(?=2[.\-、．]|\Z)", text, re.DOTALL)
+    birth_m = re.search(r"2[.\-、．]\s*(.+?)(?=3[.\-、．]|\Z)", text, re.DOTALL)
+    quest_m = re.search(r"3[.\-、．]\s*(.+)", text, re.DOTALL)
+
+    name = name_m.group(1).strip() if name_m else ""
+    birth = birth_m.group(1).strip() if birth_m else ""
+    question = quest_m.group(1).strip() if quest_m else ""
+
+    if not (name and birth):
+        lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+        if len(lines) >= 3:
+            name = lines[0]
+            birth = lines[1]
+            question = "\n".join(lines[2:])
+        elif len(lines) == 2:
+            name, birth = lines[0], lines[1]
+        elif len(lines) == 1:
+            name = lines[0]
+
+    return name, birth, question
 
 
 # ============================================================
@@ -526,6 +553,19 @@ def handle_text_message(event: MessageEvent):
                 reply_text(event, "小夏老師目前在線上，請稍候老師回覆 🙏")
             return
 
+    # === 諮詢資料填寫攔截（優先於關鍵字比對）===
+    if not is_admin(user_id) and has_intake_pending(user_id):
+        clear_intake_pending(user_id)
+        name, birth_date, question = _parse_intake_text(user_text)
+        display_name = get_user_name(user_id, configuration)
+        reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
+        notify_admin_flex(
+            user_id,
+            fm.intake_card(display_name, name, birth_date, question),
+            prefix_text="提供了諮詢資料",
+        )
+        return
+
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
 
@@ -533,31 +573,6 @@ def handle_text_message(event: MessageEvent):
         if intent == "human":
             reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
             notify_admin(user_id, user_text, reason="客人要求找小夏老師")
-            return
-
-        # ----------------------------------------------------------
-        # 客人填寫諮詢資料（① 大名 ② 出生 ③ 問題）
-        # ----------------------------------------------------------
-        if intent == "intake_form":
-            name_m = re.search(r"①\s*(.+?)(?=②|③|\Z)", user_text, re.DOTALL)
-            birth_m = re.search(r"②\s*(.+?)(?=③|\Z)", user_text, re.DOTALL)
-            quest_m = re.search(r"③\s*(.+)", user_text, re.DOTALL)
-
-            name = name_m.group(1).strip() if name_m else ""
-            birth_date = birth_m.group(1).strip() if birth_m else ""
-            question = quest_m.group(1).strip() if quest_m else ""
-
-            display_name = get_user_name(user_id, configuration)
-
-            reply_text(
-                event,
-                "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏",
-            )
-            notify_admin_flex(
-                user_id,
-                fm.intake_card(display_name, name, birth_date, question),
-                prefix_text="提供了諮詢資料",
-            )
             return
 
         # ----------------------------------------------------------
@@ -645,16 +660,20 @@ def handle_text_message(event: MessageEvent):
                 # 儲存預約（狀態：pending，等管理員確認日期）
                 save_booking(user_id, date_str, time_str, user_name)
 
+                # 標記等待填寫諮詢資料（24 小時有效）
+                set_intake_pending(user_id)
+
                 # 回覆客人
                 reply_text(
                     event,
                     f"預約申請已送出 ✓\n\n"
                     f"📅 {date_label} {time_str}\n\n"
                     f"小夏老師確認後會通知您，請稍候。\n\n"
-                    f"方便的話請先提供：\n"
-                    f"① 您的大名\n"
-                    f"② 出生年月日（國曆）\n"
-                    f"③ 想了解的問題"
+                    f"方便的話請按照以下格式，一次填寫諮詢資料：\n\n"
+                    f"1. 姓名\n"
+                    f"2. 出生年月日時\n"
+                    f"3. 想問的問題\n\n"
+                    f"⚠️ 請包含數字，一次傳送"
                 )
 
                 # 通知管理員
