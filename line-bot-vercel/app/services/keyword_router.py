@@ -16,7 +16,11 @@ KEYWORD_PATTERNS = [
     (r"^/paid(\s+\d+)?$", "booking_paid"),
     (r"^/list$", "booking_list"),
     (r"^/clear$", "booking_clear"),
+    (r"^/change\b", "booking_change"),
     (r"^/myid$", "get_my_id"),
+
+    # --- 諮詢資料（含 ① + ② 即視為填表）---
+    (r"①[\s\S]*②", "intake_form"),
 
     # --- 報到登記（0 Token）---
     (r"^我會到$|^會到$|^報到$|^\+1$|^到$|^我到了$|^我要來$", "checkin_yes"),

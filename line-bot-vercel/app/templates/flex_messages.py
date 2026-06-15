@@ -330,9 +330,145 @@ def principles_card() -> dict:
     }
 
 
+def _info_row(icon: str, text: str) -> dict:
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "spacing": "md",
+        "contents": [
+            _make_text(icon, size="sm", color=GOLD),
+            _make_text(text, size="sm", color=TEXT_WHITE),
+        ],
+    }
+
+
 # ============================================================
-# 預約引導卡片（Google Calendar 未設定時的備用）
+# 預約確認卡片（管理員 /paid 後發給客人）
 # ============================================================
+def booking_confirmed_card(customer_name: str, date_label: str, time_str: str) -> dict:
+    return {
+        "type": "flex",
+        "altText": "您的預約已完成確認",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("預約已確認 ✓", size="xl", color=GOLD, weight="bold", align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "spacing": "sm",
+                        "margin": "md",
+                        "contents": [
+                            _info_row("👤", customer_name),
+                            _info_row("📅", date_label),
+                            _info_row("🕐", time_str),
+                            _info_row("⏱", "60 分鐘"),
+                        ],
+                    },
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    _make_text("期待為您服務 🙏", size="sm", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
+# 改期通知卡片（管理員 /change 後發給客人）
+# ============================================================
+def booking_rescheduled_card(customer_name: str, date_label: str, time_str: str) -> dict:
+    return {
+        "type": "flex",
+        "altText": "您的預約已改期",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("預約已改期", size="xl", color=GOLD, weight="bold", align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "spacing": "sm",
+                        "margin": "md",
+                        "contents": [
+                            _info_row("👤", customer_name),
+                            _info_row("📅", date_label),
+                            _info_row("🕐", time_str),
+                            _info_row("⏱", "60 分鐘"),
+                        ],
+                    },
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    _make_text("如有疑問請聯絡我們 🙏", size="sm", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
+
+def intake_card(display_name: str, name: str, birth_date: str, question: str) -> dict:
+    """客戶諮詢資料卡片 — 解析用戶填寫的①②③欄位後發給管理員。"""
+    def _field(label: str, value: str) -> dict:
+        return {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "xs",
+            "contents": [
+                _make_text(label, size="xs", color=GOLD),
+                _make_text(value or "（未填）", size="sm", color=TEXT_WHITE),
+            ],
+        }
+
+    return {
+        "type": "flex",
+        "altText": f"{display_name} 的諮詢資料",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": "#2A1A00"},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("📋 客戶諮詢資料", size="lg", color=GOLD, weight="bold"),
+                    _make_text(display_name, size="sm", color=TEXT_GREY),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _field("① 大名", name),
+                    {"type": "separator", "color": DIVIDER},
+                    _field("② 出生年月日", birth_date),
+                    {"type": "separator", "color": DIVIDER},
+                    _field("③ 想了解的問題", question),
+                ],
+            },
+        },
+    }
+
+
 def booking_card() -> dict:
     return {
         "type": "flex",
@@ -447,6 +583,7 @@ def time_picker_card(date_str: str, slots: list) -> dict:
                 "contents": [
                     _make_text("選擇時段", size="xl", color=GOLD, weight="bold", align="center"),
                     _make_text(date_label, size="lg", color=TEXT_WHITE, weight="bold", align="center"),
+                    _make_text("每個時段 60 分鐘", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     *buttons,
                 ],

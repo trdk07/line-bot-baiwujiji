@@ -19,10 +19,10 @@ TW_TZ = timezone(timedelta(hours=8))
 # 每週可預約時段（weekday: 0=週一 ~ 6=週日）
 # 每個時段為 (開始時, 開始分, 結束時, 結束分)
 WEEKLY_SLOTS = {
-    1: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週二 14:00-17:00, 23:00-01:00
-    2: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週三 14:00-17:00, 23:00-01:00
-    3: [(14, 0, 17, 0), (23, 0, 1, 0)],   # 週四 14:00-17:00, 23:00-01:00
-    6: [(20, 0, 1, 0)],                     # 週日 20:00-01:00
+    0: [(15, 0, 17, 0), (19, 0, 20, 0), (23, 0, 0, 0)],  # 週一 15:00-16:00, 19:00, 23:00
+    1: [(15, 0, 17, 0), (19, 0, 20, 0), (23, 0, 0, 0)],  # 週二 15:00-16:00, 19:00, 23:00
+    3: [(15, 0, 17, 0), (19, 0, 20, 0), (23, 0, 0, 0)],  # 週四 15:00-16:00, 19:00, 23:00
+    6: [(20, 0, 1, 0)],                                    # 週日 20:00-01:00（含隔天 00:00）
 }
 SLOT_DURATION = 60  # 每個時段 60 分鐘
 
@@ -166,17 +166,24 @@ def get_available_slots(date_str: str) -> list:
         return slot_strs
 
 
-def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str]:
-    """在 Google Calendar 建立預約事件。回傳 (成功與否, 錯誤訊息)。"""
+def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str, str]:
+    """在 Google Calendar 建立預約事件。回傳 (成功與否, 錯誤訊息, 事件ID)。"""
     service, init_error = _get_calendar_service()
     settings = get_settings()
 
     if not service:
-        return False, init_error or "無法建立 Calendar 服務"
+        return False, init_error or "無法建立 Calendar 服務", ""
 
     try:
-        start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-        start_dt = start_dt.replace(tzinfo=TW_TZ)
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+        all_slots = _generate_slot_times(date)
+        matching = [s for s in all_slots if s.strftime("%H:%M") == time_str]
+        if matching:
+            start_dt = matching[0]
+        else:
+            start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            start_dt = start_dt.replace(tzinfo=TW_TZ)
+
         end_dt = start_dt + timedelta(minutes=SLOT_DURATION)
 
         event = {
@@ -185,17 +192,57 @@ def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool
             "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
         }
 
-        service.events().insert(
+        created = service.events().insert(
             calendarId=settings.google_calendar_id,
             body=event,
         ).execute()
 
         logger.info("Event created: %s %s %s", date_str, time_str, customer_name)
-        return True, ""
+        return True, "", created.get("id", "")
 
     except Exception as e:
         msg = str(e)
         logger.error("Calendar create event error: %s", msg, exc_info=True)
+        return False, msg, ""
+
+
+def update_event(event_id: str, date_str: str, time_str: str, customer_name: str) -> tuple[bool, str]:
+    """更新 Google Calendar 事件的時間。回傳 (成功與否, 錯誤訊息)。"""
+    service, init_error = _get_calendar_service()
+    settings = get_settings()
+
+    if not service:
+        return False, init_error or "無法建立 Calendar 服務"
+
+    try:
+        date = datetime.strptime(date_str, "%Y-%m-%d")
+        all_slots = _generate_slot_times(date)
+        matching = [s for s in all_slots if s.strftime("%H:%M") == time_str]
+        if matching:
+            start_dt = matching[0]
+        else:
+            start_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+            start_dt = start_dt.replace(tzinfo=TW_TZ)
+
+        end_dt = start_dt + timedelta(minutes=SLOT_DURATION)
+
+        patch_body = {
+            "summary": f"【預約】{customer_name}",
+            "start": {"dateTime": start_dt.isoformat(), "timeZone": TIMEZONE},
+            "end": {"dateTime": end_dt.isoformat(), "timeZone": TIMEZONE},
+        }
+        service.events().patch(
+            calendarId=settings.google_calendar_id,
+            eventId=event_id,
+            body=patch_body,
+        ).execute()
+
+        logger.info("Event updated: %s %s %s", date_str, time_str, customer_name)
+        return True, ""
+
+    except Exception as e:
+        msg = str(e)
+        logger.error("Calendar update event error: %s", msg, exc_info=True)
         return False, msg
 
 
