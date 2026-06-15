@@ -420,6 +420,55 @@ def booking_rescheduled_card(customer_name: str, date_label: str, time_str: str)
     }
 
 
+def intake_card(display_name: str, name: str, birth_date: str, question: str) -> dict:
+    """客戶諮詢資料卡片 — 解析用戶填寫的①②③欄位後發給管理員。"""
+    def _field(label: str, value: str) -> dict:
+        return {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "xs",
+            "contents": [
+                _make_text(label, size="xs", color=GOLD),
+                _make_text(value or "（未填）", size="sm", color=TEXT_WHITE),
+            ],
+        }
+
+    return {
+        "type": "flex",
+        "altText": f"{display_name} 的諮詢資料",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": "#2A1A00"},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("📋 客戶諮詢資料", size="lg", color=GOLD, weight="bold"),
+                    _make_text(display_name, size="sm", color=TEXT_GREY),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _field("① 大名", name),
+                    {"type": "separator", "color": DIVIDER},
+                    _field("② 出生年月日", birth_date),
+                    {"type": "separator", "color": DIVIDER},
+                    _field("③ 想了解的問題", question),
+                ],
+            },
+        },
+    }
+
+
 def booking_card() -> dict:
     return {
         "type": "flex",

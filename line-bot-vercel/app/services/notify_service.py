@@ -86,3 +86,35 @@ def push_flex_to_user(target_user_id: str, flex_dict: dict):
             )
     except Exception as e:
         logger.error("Push flex to user %s failed: %s", target_user_id, e)
+
+
+def notify_admin_flex(user_id: str, flex_dict: dict, prefix_text: str = ""):
+    """推送文字提示 + Flex 卡片給管理員。"""
+    settings = get_settings()
+    if not settings.admin_line_user_id:
+        logger.warning("ADMIN_LINE_USER_ID not set, skipping notification")
+        return
+
+    try:
+        configuration = Configuration(access_token=settings.line_channel_access_token)
+        user_name = get_user_name(user_id, configuration)
+        messages = []
+        if prefix_text:
+            messages.append(TextMessage(text=f"📢 {user_name}：{prefix_text}"))
+        messages.append(
+            FlexMessage(
+                alt_text=flex_dict["altText"],
+                contents=FlexContainer.from_dict(flex_dict["contents"]),
+            )
+        )
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=settings.admin_line_user_id,
+                    messages=messages,
+                )
+            )
+        logger.info("Admin notified with flex card for user: %s (%s)", user_name, user_id)
+    except Exception as e:
+        logger.error("Failed to notify admin flex: %s", e)

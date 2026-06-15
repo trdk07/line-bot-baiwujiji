@@ -352,6 +352,53 @@ def get_user_booking_by_status(user_id: str, status: str) -> dict | None:
     return None
 
 DONE_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
+INTAKE_PENDING_TTL = 24 * 60 * 60  # 24 小時（秒）
+
+
+def set_intake_pending(user_id: str):
+    """預約後標記用戶需填寫諮詢資料，24 小時有效。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["SET", f"intake_pending:{user_id}", "1", "EX", INTAKE_PENDING_TTL],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+def has_intake_pending(user_id: str) -> bool:
+    """檢查用戶是否在等待填寫諮詢資料。"""
+    url = _get_kv_url()
+    if not url:
+        return False
+    try:
+        response = httpx.get(
+            f"{url}/get/intake_pending:{user_id}",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        return response.json().get("result") == "1"
+    except Exception:
+        return False
+
+
+def clear_intake_pending(user_id: str):
+    """清除諮詢資料等待狀態。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["DEL", f"intake_pending:{user_id}"],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
 
 
 def save_done_booking(ref: str, booking: dict, cal_event_id: str):
