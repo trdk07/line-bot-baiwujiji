@@ -597,6 +597,24 @@ def time_picker_card(date_str: str, slots: list) -> dict:
 # ============================================================
 def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict:
     """顯示匯款 QR Code，讓客人掃碼完成匯款。"""
+    qr_section = []
+    if qr_image_url:
+        qr_section = [
+            {
+                "type": "image",
+                "url": qr_image_url,
+                "size": "full",
+                "aspectMode": "fit",
+                "aspectRatio": "1:1",
+                "margin": "md",
+            },
+            _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
+        ]
+    else:
+        qr_section = [
+            _make_text("⚠️ 匯款 QR Code 暫時無法顯示，請聯繫老師取得匯款資訊。", color=GOLD, align="center"),
+        ]
+
     return {
         "type": "flex",
         "altText": "匯款資訊 — 預約日期已確認",
@@ -614,15 +632,7 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                     _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text("✦ 匯款資訊", size="lg", color=GOLD, weight="bold", align="center"),
-                    {
-                        "type": "image",
-                        "url": qr_image_url,
-                        "size": "full",
-                        "aspectMode": "fit",
-                        "aspectRatio": "1:1",
-                        "margin": "md",
-                    },
-                    _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
+                    *qr_section,
                     _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text(

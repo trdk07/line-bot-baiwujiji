@@ -313,6 +313,9 @@ def handle_text_message(event: MessageEvent):
                 )
                 return
 
+            # 付款流程開始，清除諮詢資料等待狀態（避免客人問 QR Code 被誤抓）
+            clear_intake_pending(ctx_user)
+
             # 推送匯款 QR Code 卡片給客人
             push_flex_to_user(
                 ctx_user,
@@ -573,6 +576,25 @@ def handle_text_message(event: MessageEvent):
         if intent == "human":
             reply_text(event, "好的，已經通知小夏老師了，老師會盡快回覆你，請稍候。🙏")
             notify_admin(user_id, user_text, reason="客人要求找小夏老師")
+            return
+
+        # ----------------------------------------------------------
+        # 諮詢資料後備：①②③ 格式（intake_pending 已消耗後仍可補填）
+        # ----------------------------------------------------------
+        if intent == "intake_form":
+            name_m = re.search(r"①\s*(.+?)(?=②|③|\Z)", user_text, re.DOTALL)
+            birth_m = re.search(r"②\s*(.+?)(?=③|\Z)", user_text, re.DOTALL)
+            quest_m = re.search(r"③\s*(.+)", user_text, re.DOTALL)
+            name = name_m.group(1).strip() if name_m else ""
+            birth_date = birth_m.group(1).strip() if birth_m else ""
+            question = quest_m.group(1).strip() if quest_m else ""
+            display_name = get_user_name(user_id, configuration)
+            reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
+            notify_admin_flex(
+                user_id,
+                fm.intake_card(display_name, name, birth_date, question),
+                prefix_text="補填了諮詢資料",
+            )
             return
 
         # ----------------------------------------------------------
