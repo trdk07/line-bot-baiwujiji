@@ -345,7 +345,32 @@ def _info_row(icon: str, text: str) -> dict:
 # ============================================================
 # 預約確認卡片（管理員 /paid 後發給客人）
 # ============================================================
-def booking_confirmed_card(customer_name: str, date_label: str, time_str: str) -> dict:
+def booking_confirmed_card(
+    customer_name: str,
+    date_label: str,
+    time_str: str,
+    birth_date: str = "",
+    question: str = "",
+) -> dict:
+    consultation_section = []
+    if birth_date or question:
+        rows = []
+        if birth_date:
+            rows.append(_info_row("②", f"出生年月日：{birth_date}"))
+        if question:
+            rows.append(_info_row("③", f"想問的問題：{question}"))
+        consultation_section = [
+            {"type": "separator", "color": DIVIDER, "margin": "lg"},
+            _make_text("📋 諮詢資料", size="md", color=GOLD, weight="bold"),
+            {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "margin": "sm",
+                "contents": rows,
+            },
+        ]
+
     return {
         "type": "flex",
         "altText": "您的預約已完成確認",
@@ -367,14 +392,15 @@ def booking_confirmed_card(customer_name: str, date_label: str, time_str: str) -
                         "spacing": "sm",
                         "margin": "md",
                         "contents": [
-                            _info_row("👤", customer_name),
+                            _info_row("🙋🏻", customer_name),
                             _info_row("📅", date_label),
                             _info_row("🕐", time_str),
                             _info_row("⏱", "60 分鐘"),
                         ],
                     },
+                    *consultation_section,
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
-                    _make_text("期待為您服務 🙏", size="sm", color=TEXT_GREY, align="center"),
+                    _make_text("期待與您的相遇 🤟🏻", size="sm", color=TEXT_GREY, align="center"),
                 ],
             },
         },
@@ -597,6 +623,24 @@ def time_picker_card(date_str: str, slots: list) -> dict:
 # ============================================================
 def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict:
     """顯示匯款 QR Code，讓客人掃碼完成匯款。"""
+    qr_section = []
+    if qr_image_url:
+        qr_section = [
+            {
+                "type": "image",
+                "url": qr_image_url,
+                "size": "full",
+                "aspectMode": "fit",
+                "aspectRatio": "1:1",
+                "margin": "md",
+            },
+            _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
+        ]
+    else:
+        qr_section = [
+            _make_text("⚠️ 匯款 QR Code 暫時無法顯示，請聯繫老師取得匯款資訊。", color=GOLD, align="center"),
+        ]
+
     return {
         "type": "flex",
         "altText": "匯款資訊 — 預約日期已確認",
@@ -614,15 +658,7 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                     _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text("✦ 匯款資訊", size="lg", color=GOLD, weight="bold", align="center"),
-                    {
-                        "type": "image",
-                        "url": qr_image_url,
-                        "size": "full",
-                        "aspectMode": "fit",
-                        "aspectRatio": "1:1",
-                        "margin": "md",
-                    },
-                    _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
+                    *qr_section,
                     _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text(

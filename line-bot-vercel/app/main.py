@@ -83,3 +83,18 @@ async def debug_calendar():
         result["calendar_access"] = "跳過（GOOGLE_CALENDAR_ID 未設定）"
 
     return result
+
+
+@app.get("/debug/env")
+async def debug_env():
+    """診斷關鍵環境變數是否正確設定。"""
+    from app.config import get_settings
+    settings = get_settings()
+    qr_url = settings.payment_qr_image_url
+    return {
+        "payment_qr_image_url_set": bool(qr_url),
+        "payment_qr_image_url_preview": (qr_url[:60] + "...") if len(qr_url) > 60 else qr_url,
+        "admin_id_set": bool(settings.admin_line_user_id),
+        "kv_url_set": bool(settings.kv_rest_api_url),
+        "google_calendar_id_set": bool(settings.google_calendar_id),
+    }

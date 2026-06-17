@@ -19,6 +19,9 @@ KEYWORD_PATTERNS = [
     (r"^/change\b", "booking_change"),
     (r"^/myid$", "get_my_id"),
 
+    # --- 諮詢資料後備（①②③ 格式，intake_pending 消耗後仍可補填）---
+    (r"①[\s\S]*②", "intake_form"),
+
     # --- 報到登記（0 Token）---
     (r"^我會到$|^會到$|^報到$|^\+1$|^到$|^我到了$|^我要來$", "checkin_yes"),
     (r"會晚到|晚到|晚一點", "checkin_late"),
