@@ -401,6 +401,60 @@ def clear_intake_pending(user_id: str):
         pass
 
 
+INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
+
+
+def save_intake_data(user_id: str, birth_date: str, question: str):
+    """儲存諮詢資料（出生年月日、問題），30 天有效。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    data = json.dumps({"b": birth_date, "q": question}, ensure_ascii=False)
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["SET", f"intake_data:{user_id}", data, "EX", INTAKE_DATA_TTL],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+def get_intake_data(user_id: str) -> tuple:
+    """取得諮詢資料，回傳 (birth_date, question)。找不到回傳 ("", "")。"""
+    url = _get_kv_url()
+    if not url:
+        return "", ""
+    try:
+        response = httpx.get(
+            f"{url}/get/intake_data:{user_id}",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        result = response.json().get("result")
+        if result:
+            data = json.loads(result)
+            return data.get("b", ""), data.get("q", "")
+    except Exception:
+        pass
+    return "", ""
+
+
+def clear_intake_data(user_id: str):
+    """清除諮詢資料。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["DEL", f"intake_data:{user_id}"],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
 def save_done_booking(ref: str, booking: dict, cal_event_id: str):
     """預約完成後存入 done 區，保留 30 天供改期使用。"""
     done_data = {**booking, "s": "done", "cal_id": cal_event_id}

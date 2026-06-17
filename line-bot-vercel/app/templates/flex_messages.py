@@ -345,7 +345,32 @@ def _info_row(icon: str, text: str) -> dict:
 # ============================================================
 # 預約確認卡片（管理員 /paid 後發給客人）
 # ============================================================
-def booking_confirmed_card(customer_name: str, date_label: str, time_str: str) -> dict:
+def booking_confirmed_card(
+    customer_name: str,
+    date_label: str,
+    time_str: str,
+    birth_date: str = "",
+    question: str = "",
+) -> dict:
+    consultation_section = []
+    if birth_date or question:
+        rows = []
+        if birth_date:
+            rows.append(_info_row("②", f"出生年月日：{birth_date}"))
+        if question:
+            rows.append(_info_row("③", f"想問的問題：{question}"))
+        consultation_section = [
+            {"type": "separator", "color": DIVIDER, "margin": "lg"},
+            _make_text("📋 諮詢資料", size="md", color=GOLD, weight="bold"),
+            {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "margin": "sm",
+                "contents": rows,
+            },
+        ]
+
     return {
         "type": "flex",
         "altText": "您的預約已完成確認",
@@ -367,14 +392,15 @@ def booking_confirmed_card(customer_name: str, date_label: str, time_str: str) -
                         "spacing": "sm",
                         "margin": "md",
                         "contents": [
-                            _info_row("👤", customer_name),
+                            _info_row("🙋🏻", customer_name),
                             _info_row("📅", date_label),
                             _info_row("🕐", time_str),
                             _info_row("⏱", "60 分鐘"),
                         ],
                     },
+                    *consultation_section,
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
-                    _make_text("期待為您服務 🙏", size="sm", color=TEXT_GREY, align="center"),
+                    _make_text("期待與您的相遇 🤟🏻", size="sm", color=TEXT_GREY, align="center"),
                 ],
             },
         },

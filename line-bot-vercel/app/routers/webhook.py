@@ -48,6 +48,7 @@ from app.services.state_service import (
     save_done_booking, get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
     set_intake_pending, has_intake_pending, clear_intake_pending,
+    save_intake_data, get_intake_data, clear_intake_data,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -391,10 +392,17 @@ def handle_text_message(event: MessageEvent):
             # 建立 Google Calendar 事件
             cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
 
+            # 取得諮詢資料（出生年月日、問題）
+            intake_birth, intake_question = get_intake_data(ctx_user)
+            clear_intake_data(ctx_user)
+
             # 通知客人：預約確認卡片
             push_flex_to_user(
                 ctx_user,
-                fm.booking_confirmed_card(booking["n"], date_label, booking["t"]),
+                fm.booking_confirmed_card(
+                    booking["n"], date_label, booking["t"],
+                    birth_date=intake_birth, question=intake_question,
+                ),
             )
 
             # 完成後存入 done 區（供改期使用）
@@ -561,6 +569,7 @@ def handle_text_message(event: MessageEvent):
         clear_intake_pending(user_id)
         name, birth_date, question = _parse_intake_text(user_text)
         display_name = get_user_name(user_id, configuration)
+        save_intake_data(user_id, birth_date, question)
         reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
         notify_admin_flex(
             user_id,
@@ -589,6 +598,7 @@ def handle_text_message(event: MessageEvent):
             birth_date = birth_m.group(1).strip() if birth_m else ""
             question = quest_m.group(1).strip() if quest_m else ""
             display_name = get_user_name(user_id, configuration)
+            save_intake_data(user_id, birth_date, question)
             reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
             notify_admin_flex(
                 user_id,
