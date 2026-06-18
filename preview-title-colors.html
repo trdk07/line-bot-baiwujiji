@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>標題顏色選擇</title>
+<style>
+  body {
+    margin: 0;
+    padding: 24px 16px;
+    background: #D8D0C6;
+    font-family: -apple-system, "Helvetica Neue", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  h2 {
+    color: #3a2f26;
+    font-size: 13px;
+    letter-spacing: .08em;
+    margin: 0 0 4px;
+    text-align: center;
+  }
+
+  /* 卡片 */
+  .card {
+    width: 300px;
+    background: #EFEBE5;
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.12);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .title {
+    font-size: 18px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  .sep { border: none; border-top: 1px solid #C8B8A8; margin: 0; }
+
+  .sub {
+    color: #6E675E;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .body-text {
+    color: #4A453C;
+    font-size: 13px;
+  }
+
+  .btn {
+    display: block;
+    background: #8B2020;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+  }
+
+  /* 標籤 */
+  .label-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: -6px;
+  }
+  .chip {
+    display: inline-block;
+    font-size: 10px;
+    background: #3a2f26;
+    color: #fff;
+    border-radius: 4px;
+    padding: 2px 7px;
+    letter-spacing: .04em;
+  }
+  .hex { font-size: 11px; color: #6E675E; font-family: monospace; }
+  .desc { font-size: 11px; color: #9a8f84; }
+</style>
+</head>
+<body>
+
+<h2>▸ 目前（太淡）</h2>
+<div class="card">
+  <div class="title" style="color:#C2A68C">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<h2 style="margin-top:16px">▸ 選項 A</h2>
+<div class="label-row">
+  <span class="chip">A</span>
+  <span class="hex">#2C2C2C</span>
+  <span class="desc">近黑 — 最清晰，偏現代</span>
+</div>
+<div class="card">
+  <div class="title" style="color:#2C2C2C">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<h2>▸ 選項 B</h2>
+<div class="label-row">
+  <span class="chip">B</span>
+  <span class="hex">#5C3317</span>
+  <span class="desc">深可可棕 — 暖調、有質感</span>
+</div>
+<div class="card">
+  <div class="title" style="color:#5C3317">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<h2>▸ 選項 C</h2>
+<div class="label-row">
+  <span class="chip">C</span>
+  <span class="hex">#7B3F2A</span>
+  <span class="desc">赤褐 — 偏紅土，跟按鈕呼應</span>
+</div>
+<div class="card">
+  <div class="title" style="color:#7B3F2A">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<h2>▸ 選項 D</h2>
+<div class="label-row">
+  <span class="chip">D</span>
+  <span class="hex">#8B2020</span>
+  <span class="desc">跟按鈕同色 — 強烈一致感</span>
+</div>
+<div class="card">
+  <div class="title" style="color:#8B2020">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<h2>▸ 選項 E</h2>
+<div class="label-row">
+  <span class="chip">E</span>
+  <span class="hex">#4A3728</span>
+  <span class="desc">深褐 — 低調中性，不搶眼</span>
+</div>
+<div class="card">
+  <div class="title" style="color:#4A3728">選擇預約日期</div>
+  <div class="sub">請選擇方便的日期</div>
+  <hr class="sep">
+  <div class="btn">6/19（四）</div>
+  <div class="btn">6/20（五）</div>
+</div>
+
+<!-- 完整卡片對比 B vs D -->
+<h2 style="margin-top:24px">▸ 完整卡片對比：B vs D</h2>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+    <span class="chip">B  #5C3317</span>
+    <div class="card" style="width:260px">
+      <div class="title" style="color:#5C3317">日期已確認 ✓</div>
+      <div class="sub">📅 6/19（四）　16:00</div>
+      <hr class="sep">
+      <div class="title" style="font-size:15px;color:#5C3317">✦ 匯款資訊</div>
+      <div class="body-text" style="text-align:center">NT$ 3,600</div>
+      <hr class="sep">
+      <div class="btn">✦ 已匯款</div>
+    </div>
+    <div class="card" style="width:260px">
+      <div class="title" style="color:#5C3317">諮詢資料填寫</div>
+      <div class="sub">預約送出後請填寫以下資料</div>
+      <hr class="sep">
+      <div class="body-text">1. 姓名</div>
+      <div class="body-text">2. 出生年月日時</div>
+      <div class="body-text">3. 想問的問題</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+    <span class="chip">D  #8B2020</span>
+    <div class="card" style="width:260px">
+      <div class="title" style="color:#8B2020">日期已確認 ✓</div>
+      <div class="sub">📅 6/19（四）　16:00</div>
+      <hr class="sep">
+      <div class="title" style="font-size:15px;color:#8B2020">✦ 匯款資訊</div>
+      <div class="body-text" style="text-align:center">NT$ 3,600</div>
+      <hr class="sep">
+      <div class="btn">✦ 已匯款</div>
+    </div>
+    <div class="card" style="width:260px">
+      <div class="title" style="color:#8B2020">諮詢資料填寫</div>
+      <div class="sub">預約送出後請填寫以下資料</div>
+      <hr class="sep">
+      <div class="body-text">1. 姓名</div>
+      <div class="body-text">2. 出生年月日時</div>
+      <div class="body-text">3. 想問的問題</div>
+    </div>
+  </div>
+
+</div>
+
+<p style="color:#9a8f84;font-size:11px;text-align:center;margin-top:8px">
+  告訴我你選哪個（A/B/C/D/E），或直接說想要的顏色
+</p>
+
+</body>
+</html>
