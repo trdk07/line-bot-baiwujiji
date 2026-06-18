@@ -6,11 +6,12 @@ LINE Flex Message 模板 — 所有互動卡片的定義。
 from datetime import datetime
 
 # === 色彩定義 ===
-BG_DARK = "#1B1B1B"
-GOLD = "#C9A962"
-TEXT_WHITE = "#FFFFFF"
-TEXT_GREY = "#AAAAAA"
-DIVIDER = "#333333"
+BG_DARK = "#EFEBE5"      # 卡片 body 背景
+GOLD = "#C2A68C"         # icon 點綴 / 標籤
+TEXT_WHITE = "#4A453C"   # 主內文
+TEXT_GREY = "#6E675E"    # 淡色說明
+DIVIDER = "#C8B8A8"      # 分隔線
+ACCENT_RED = "#8B2020"   # 主按鈕 / 預約完成強調
 
 WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -21,7 +22,7 @@ def _make_button(label: str, text: str) -> dict:
         "type": "button",
         "action": {"type": "message", "label": label, "text": text},
         "style": "primary",
-        "color": GOLD,
+        "color": ACCENT_RED,
         "height": "sm",
         "margin": "sm",
     }
@@ -384,7 +385,7 @@ def booking_confirmed_card(
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("預約已確認 ✓", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("預約已確認 ✓", size="xl", color=ACCENT_RED, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     {
                         "type": "box",
@@ -466,7 +467,7 @@ def intake_card(display_name: str, name: str, birth_date: str, question: str) ->
             "type": "bubble",
             "size": "mega",
             "styles": {
-                "header": {"backgroundColor": "#2A1A00"},
+                "header": {"backgroundColor": "#3D1F1F"},
                 "body": {"backgroundColor": BG_DARK},
             },
             "header": {
