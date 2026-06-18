@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>百無禁忌 — 新配色預覽</title>
+<style>
+  /* ── 新配色 ── */
+  :root {
+    --bg-page:      #E8E1D9;
+    --bg-bubble:    #F5F0EB;
+    --bg-card:      #EFEBE5;
+    --divider:      #C8B8A8;
+    --title:        #2C2C2C;
+    --body:         #4A453C;
+    --muted:        #6E675E;
+    --btn-primary:  #8B2020;
+    --btn-text:     #FFFFFF;
+    --btn-sec-bg:   #EFEBE5;
+    --btn-sec-text: #2C2C2C;
+    --btn-sec-bd:   #C8B8A8;
+    --tag-bg:       #F5F0EB;
+    --tag-text:     #C23B3B;
+    --icon:         #C2A68C;
+  }
+
+  body {
+    margin: 0;
+    padding: 24px 16px;
+    background: #D8D0C6;
+    font-family: -apple-system, "Helvetica Neue", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  h2 {
+    color: #3a3028;
+    font-size: 14px;
+    letter-spacing: .08em;
+    margin: 0;
+    text-align: center;
+    opacity: .6;
+  }
+
+  /* ── Bubble shell ── */
+  .bubble {
+    width: 320px;
+    border-radius: 16px;
+    background: var(--bg-bubble);
+    box-shadow: 0 2px 12px rgba(0,0,0,.12);
+    overflow: hidden;
+  }
+
+  .card-header {
+    background: #3D1F1F;
+    padding: 16px 20px;
+  }
+  .card-header .title { color: #E8C9A0; font-size: 16px; font-weight: bold; }
+  .card-header .sub   { color: #A0806A; font-size: 12px; margin-top: 2px; }
+
+  .card-body {
+    background: var(--bg-card);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .sep { border: none; border-top: 1px solid var(--divider); margin: 0; }
+
+  /* text helpers */
+  .t-title { color: var(--title); font-size: 18px; font-weight: bold; }
+  .t-body  { color: var(--body);  font-size: 13px; line-height: 1.6; }
+  .t-muted { color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .t-gold  { color: var(--icon);  font-size: 13px; font-weight: bold; }
+  .t-center { text-align: center; }
+
+  /* row */
+  .row { display: flex; gap: 10px; align-items: flex-start; }
+  .row .icon { color: var(--icon); font-size: 14px; min-width: 20px; }
+  .row .val  { color: var(--body); font-size: 13px; }
+
+  /* tag */
+  .tag {
+    display: inline-block;
+    background: var(--tag-bg);
+    color: var(--tag-text);
+    border: 1px solid #E0C4C4;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 2px 8px;
+    letter-spacing: .04em;
+  }
+
+  /* buttons */
+  .btn-primary {
+    display: block;
+    background: var(--btn-primary);
+    color: var(--btn-text);
+    border: none;
+    border-radius: 8px;
+    padding: 11px;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+    letter-spacing: .04em;
+  }
+  .btn-secondary {
+    display: block;
+    background: var(--btn-sec-bg);
+    color: var(--btn-sec-text);
+    border: 1.5px solid var(--btn-sec-bd);
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .field-label { color: var(--icon); font-size: 11px; margin-bottom: 2px; }
+  .field-value { color: var(--body); font-size: 13px; }
+
+  /* OLD dark card for comparison */
+  .bubble-dark { filter: none; }
+  .card-header-dark { background: #1B1B1B; padding: 20px; }
+  .card-body-dark { background: #1B1B1B; padding: 20px; display:flex; flex-direction:column; gap:14px; }
+  .sep-dark { border:none; border-top:1px solid #333; margin:0; }
+  .t-gold-old { color:#C9A962; font-size:18px; font-weight:bold; }
+  .t-grey-old { color:#AAAAAA; font-size:11px; }
+  .row-dark .icon { color:#C9A962; font-size:14px; min-width:20px; }
+  .row-dark .val  { color:#FFFFFF; font-size:13px; }
+  .row-dark { display:flex; gap:10px; }
+  .btn-gold { display:block; background:#C9A962; color:#000; border:none; border-radius:8px; padding:11px; font-size:14px; font-weight:bold; text-align:center; }
+
+  .label { font-size:11px; color:#7a6f65; letter-spacing:.06em; margin-bottom:-8px; }
+
+  /* side by side */
+  .compare { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; justify-content:center; }
+</style>
+</head>
+<body>
+
+<h2>◆ 配色對照 ◆</h2>
+
+<div class="compare">
+
+  <!-- ══ 舊版（暗色）══ -->
+  <div>
+    <p class="label" style="text-align:center">▸ 現在（暗色）</p>
+    <div class="bubble bubble-dark">
+      <div class="card-body-dark">
+        <div class="t-gold-old" style="text-align:center">預約已確認 ✓</div>
+        <hr class="sep-dark">
+        <div class="row-dark"><span class="icon">🙋🏻</span><span class="val">林冠緯</span></div>
+        <div class="row-dark"><span class="icon">📅</span><span class="val">6/18（四）</span></div>
+        <div class="row-dark"><span class="icon">🕐</span><span class="val">16:00</span></div>
+        <div class="row-dark"><span class="icon">⏱</span><span class="val">60 分鐘</span></div>
+        <hr class="sep-dark">
+        <div style="color:#C9A962;font-size:13px;font-weight:bold">📋 諮詢資料</div>
+        <div class="row-dark"><span class="icon">②</span><span class="val">出生年月日：85/5/2</span></div>
+        <div class="row-dark"><span class="icon">③</span><span class="val">想問流年運勢</span></div>
+        <hr class="sep-dark">
+        <div class="t-grey-old" style="text-align:center">期待與您的相遇 🤟🏻</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ 新版（暖色）══ -->
+  <div>
+    <p class="label" style="text-align:center">▸ 新版（暖土色）</p>
+    <div class="bubble">
+      <div class="card-body">
+        <div class="t-title t-center">預約已確認 ✓</div>
+        <hr class="sep">
+        <div class="row"><span class="icon">🙋🏻</span><span class="val">林冠緯</span></div>
+        <div class="row"><span class="icon">📅</span><span class="val">6/18（四）</span></div>
+        <div class="row"><span class="icon">🕐</span><span class="val">16:00</span></div>
+        <div class="row"><span class="icon">⏱</span><span class="val">60 分鐘</span></div>
+        <hr class="sep">
+        <div class="t-gold">📋 諮詢資料</div>
+        <div class="row"><span class="icon">②</span><span class="val">出生年月日：85/5/2</span></div>
+        <div class="row"><span class="icon">③</span><span class="val">想問流年運勢</span></div>
+        <hr class="sep">
+        <div class="t-muted t-center">期待與您的相遇 🤟🏻</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══ 新版：服務選單 ══ -->
+<h2>◆ 服務選單卡片 ◆</h2>
+<div class="bubble">
+  <div class="card-body">
+    <div class="t-title t-center">百無禁忌研究所</div>
+    <div class="t-muted t-center">— 服務項目 —</div>
+    <hr class="sep">
+    <button class="btn-primary">✦ 人生困惑諮詢</button>
+    <button class="btn-primary">✦ 算命問事</button>
+    <button class="btn-primary">✦ 招財項目</button>
+    <button class="btn-primary">✦ 感情項目</button>
+    <button class="btn-secondary">✦ 風水調整</button>
+    <button class="btn-secondary">✦ 客製化疑難雜症法事</button>
+  </div>
+</div>
+
+<!-- ══ 新版：匯款卡片 ══ -->
+<h2>◆ 匯款資訊卡片 ◆</h2>
+<div class="bubble">
+  <div class="card-body">
+    <div class="t-title t-center">日期已確認 ✓</div>
+    <div class="t-body t-center">📅 6/18（四）　16:00</div>
+    <hr class="sep">
+    <div class="t-gold t-center">✦ 匯款資訊</div>
+    <div style="background:#e0d8cf;border-radius:10px;height:160px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">[ QR Code ]</div>
+    <div class="t-muted t-center">請掃描上方 QR Code 完成匯款</div>
+    <div class="t-title t-center" style="font-size:15px">NT$ 3,600</div>
+    <hr class="sep">
+    <div class="t-body">⚠️ 匯款完成後，請務必按下方「已匯款」按鈕通知我們，預約才算成立。</div>
+    <button class="btn-primary">✦ 已匯款</button>
+    <div class="t-muted t-center">百無禁忌研究所</div>
+  </div>
+</div>
+
+<!-- ══ 新版：諮詢資料卡（管理員後台）══ -->
+<h2>◆ 管理員後台：客戶諮詢資料 ◆</h2>
+<div class="bubble">
+  <div class="card-header">
+    <div class="title">📋 客戶諮詢資料</div>
+    <div class="sub">林冠緯</div>
+  </div>
+  <div class="card-body">
+    <div>
+      <div class="field-label">① 大名</div>
+      <div class="field-value">林冠緯</div>
+    </div>
+    <hr class="sep">
+    <div>
+      <div class="field-label">② 出生年月日</div>
+      <div class="field-value">85/5/2</div>
+    </div>
+    <hr class="sep">
+    <div>
+      <div class="field-label">③ 想了解的問題</div>
+      <div class="field-value">想了解今年流年運勢，事業跟感情</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 色票 ══ -->
+<h2>◆ 色票一覽 ◆</h2>
+<div style="width:320px;background:var(--bg-bubble);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.1)">
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#F5F0EB;border:1px solid #ccc"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#F5F0EB<br>泡泡</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#EFEBE5;border:1px solid #ccc"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#EFEBE5<br>卡片</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#C8B8A8;border:1px solid #ccc"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#C8B8A8<br>分隔線</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#2C2C2C"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#2C2C2C<br>標題</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#4A453C"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#4A453C<br>內文</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#6E675E"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#6E675E<br>說明</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#8B2020"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#8B2020<br>主按鈕</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#C23B3B"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#C23B3B<br>tag</div>
+    </div>
+    <div style="text-align:center">
+      <div style="width:56px;height:56px;border-radius:8px;background:#C2A68C"></div>
+      <div style="font-size:9px;color:#666;margin-top:3px">#C2A68C<br>icon</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
