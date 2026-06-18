@@ -7,7 +7,8 @@ from datetime import datetime
 
 # === 色彩定義 ===
 BG_DARK = "#EFEBE5"      # 卡片 body 背景
-GOLD = "#C2A68C"         # icon 點綴 / 標籤
+GOLD = "#C2A68C"         # icon 點綴 / 標籤（淺色底用）
+TEXT_TITLE = "#7B3F2A"   # 卡片標題（赤褐）
 TEXT_WHITE = "#4A453C"   # 主內文
 TEXT_GREY = "#6E675E"    # 淡色說明
 DIVIDER = "#C8B8A8"      # 分隔線
@@ -59,7 +60,7 @@ def service_menu() -> dict:
                 "spacing": "lg",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("百無禁忌研究所", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     _make_text("— 服務項目 —", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_button("✦ 人生困惑諮詢", "人生困惑諮詢"),
@@ -91,7 +92,7 @@ def consultation_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("人生困惑諮詢", size="xl", color=GOLD, weight="bold"),
+                    _make_text("人生困惑諮詢", size="xl", color=TEXT_TITLE, weight="bold"),
                     _make_text("$3,600", size="lg", color=TEXT_WHITE, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text(
@@ -127,7 +128,7 @@ def fortune_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("算命問事", size="xl", color=GOLD, weight="bold"),
+                    _make_text("算命問事", size="xl", color=TEXT_TITLE, weight="bold"),
                     _make_text("每項 $3,600", size="md", color=TEXT_WHITE),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("✦ 財運流年推測", color=TEXT_WHITE),
@@ -158,7 +159,7 @@ def wealth_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("招財項目", size="xl", color=GOLD, weight="bold"),
+                    _make_text("招財項目", size="xl", color=TEXT_TITLE, weight="bold"),
                     _make_text("依個人狀況報價", size="md", color=TEXT_WHITE, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text(
@@ -198,7 +199,7 @@ def love_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("感情項目", size="xl", color=GOLD, weight="bold"),
+                    _make_text("感情項目", size="xl", color=TEXT_TITLE, weight="bold"),
                     _make_text("依個人狀況報價", size="md", color=TEXT_WHITE, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text(
@@ -236,7 +237,7 @@ def fengshui_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("風水調整", size="xl", color=GOLD, weight="bold"),
+                    _make_text("風水調整", size="xl", color=TEXT_TITLE, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("✦ 奇門遁甲", color=TEXT_WHITE),
                     _make_text("✦ 九宮飛星", color=TEXT_WHITE),
@@ -266,8 +267,8 @@ def custom_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("專屬客製化", size="xl", color=GOLD, weight="bold"),
-                    _make_text("疑難雜症法事", size="xl", color=GOLD, weight="bold"),
+                    _make_text("專屬客製化", size="xl", color=TEXT_TITLE, weight="bold"),
+                    _make_text("疑難雜症法事", size="xl", color=TEXT_TITLE, weight="bold"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text(
                         "每個人的狀況都是獨一無二的。如果你的問題比較特殊，老師會針對你的情況量身安排最適合的法事。",
@@ -298,25 +299,25 @@ def principles_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("預約諮詢前", size="xl", color=GOLD, weight="bold", align="center"),
-                    _make_text("請先了解百無禁忌的原則", size="md", color=GOLD, weight="bold", align="center"),
+                    _make_text("預約諮詢前", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
+                    _make_text("請先了解百無禁忌的原則", size="md", color=TEXT_TITLE, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
 
-                    _make_text("① 玄學可以很科學", size="md", color=GOLD, weight="bold"),
+                    _make_text("① 玄學可以很科學", size="md", color=TEXT_TITLE, weight="bold"),
                     _make_text(
                         "是能落地的日常策略。預約諮詢不代表一定要「做法術」，就像看診一樣，先幫你找出目前卡關的核心盲點。有時候，你需要的只是一套能落實在日常的能量策略。",
                         color=TEXT_GREY,
                     ),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
 
-                    _make_text("② 專業需要付費", size="md", color=GOLD, weight="bold"),
+                    _make_text("② 專業需要付費", size="md", color=TEXT_TITLE, weight="bold"),
                     _make_text(
                         "可以理解成能量交換。你可以跟我聊聊發生了什麼事，但只要開始運用專業知識為你梳理脈絡、對症下藥，就需要收取諮詢費。",
                         color=TEXT_GREY,
                     ),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
 
-                    _make_text("③ 疑人不用，不勉強、不耗損", size="md", color=GOLD, weight="bold"),
+                    _make_text("③ 疑人不用，不勉強、不耗損", size="md", color=TEXT_TITLE, weight="bold"),
                     _make_text(
                         "隔著網路沒見過面，有疑慮很合理。如果覺得不需要協助，或是對諮詢金額感到有壓力，可以直接說「先不用」。千萬別覺得不好意思。當你準備好了、願意交付信任時，我們再開始。",
                         color=TEXT_GREY,
@@ -362,7 +363,7 @@ def booking_confirmed_card(
             rows.append(_info_row("③", f"想問的問題：{question}"))
         consultation_section = [
             {"type": "separator", "color": DIVIDER, "margin": "lg"},
-            _make_text("📋 諮詢資料", size="md", color=GOLD, weight="bold"),
+            _make_text("📋 諮詢資料", size="md", color=TEXT_TITLE, weight="bold"),
             {
                 "type": "box",
                 "layout": "vertical",
@@ -425,7 +426,7 @@ def booking_rescheduled_card(customer_name: str, date_label: str, time_str: str)
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("預約已改期", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("預約已改期", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     {
                         "type": "box",
@@ -510,7 +511,7 @@ def booking_card() -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("預約諮詢", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("預約諮詢", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "md"},
                     _make_text("請提供以下資訊，老師會盡快跟你確認時間：", color=TEXT_WHITE),
                     _make_text("① 您的大名", color=GOLD),
@@ -561,7 +562,7 @@ def date_picker_card(dates: list) -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("選擇預約日期", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("選擇預約日期", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     _make_text("請選擇方便的日期", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     *buttons,
@@ -608,7 +609,7 @@ def time_picker_card(date_str: str, slots: list) -> dict:
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("選擇時段", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("選擇時段", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     _make_text(date_label, size="lg", color=TEXT_WHITE, weight="bold", align="center"),
                     _make_text("每個時段 60 分鐘", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
@@ -655,12 +656,12 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                 "spacing": "md",
                 "paddingAll": "20px",
                 "contents": [
-                    _make_text("日期已確認 ✓", size="xl", color=GOLD, weight="bold", align="center"),
+                    _make_text("日期已確認 ✓", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
                     _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
-                    _make_text("✦ 匯款資訊", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("✦ 匯款資訊", size="lg", color=TEXT_TITLE, weight="bold", align="center"),
                     *qr_section,
-                    _make_text("金額：NT$ 3,600", size="md", color=GOLD, weight="bold", align="center"),
+                    _make_text("金額：NT$ 3,600", size="md", color=TEXT_TITLE, weight="bold", align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     _make_text(
                         "⚠️ 匯款完成後，請務必按下方「已匯款」按鈕通知我們，預約才算成立。",
