@@ -7,6 +7,9 @@ import re
 from typing import Optional
 
 # (正則表達式, 意圖代碼)
+# 順序即優先權：越前面的 pattern 越先比對到就直接回傳，不會再往下比對。
+# 同一組內的 alternative 已移除「被其他 alternative 包含的冗餘字串」
+# （例如「算命問事」本身已包含「算命」與「問事」，比對結果與只留「算命|問事」完全相同）。
 KEYWORD_PATTERNS = [
     # --- 管理員指令（放最前面，優先比對）---
     (r"^/off$", "bot_off"),
@@ -15,7 +18,7 @@ KEYWORD_PATTERNS = [
     (r"^/no(\s+\d+)?$", "booking_no"),
     (r"^/paid(\s+\d+)?$", "booking_paid"),
     (r"^/list$", "booking_list"),
-    (r"^/clear$", "booking_clear"),
+    (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
     (r"^/myid$", "get_my_id"),
 
@@ -37,20 +40,23 @@ KEYWORD_PATTERNS = [
     # --- 服務分類（放在「服務項目」之前，避免「招財項目」「感情項目」被「項目」搶先匹配）---
     (r"什麼是諮詢|為什麼要諮詢|諮詢是什麼|為何諮詢|為什麼要先諮詢", "what_is_consultation"),
     (r"人生困惑|困惑諮詢", "category_consultation"),
-    (r"算命問事|算命|問事", "category_fortune"),
-    (r"招財項目|招財", "category_wealth"),
-    (r"感情項目|感情", "category_love"),
-    (r"風水調整|風水", "category_fengshui"),
+    (r"算命|問事", "category_fortune"),
+    (r"招財", "category_wealth"),
+    (r"感情", "category_love"),
+    (r"風水", "category_fengshui"),
     (r"客製化|疑難雜症|法事", "category_custom"),
 
     # --- 主要動作 ---
-    (r"我要預約|預約|想預約|預約諮詢|我想預約", "booking"),
-    (r"服務項目|有什麼服務|服務|項目|你們做什麼|能做什麼", "services"),
-    (r"找小夏老師|找老師|找小夏", "human"),
+    (r"預約", "booking"),
+    (r"服務|項目|你們做什麼|能做什麼", "services"),
+    (r"找老師|找小夏", "human"),
 
     # --- 價格防禦 ---
     (r"多少錢|價格|費用|報價|怎麼收費|收費標準", "pricing"),
 ]
+
+# 模組載入時預先編譯，避免每次請求重新編譯 regex。
+_COMPILED_PATTERNS = [(re.compile(pattern, re.IGNORECASE), intent) for pattern, intent in KEYWORD_PATTERNS]
 
 
 def match_keyword(text: str) -> Optional[str]:
@@ -59,7 +65,7 @@ def match_keyword(text: str) -> Optional[str]:
     回傳 None 代表沒有匹配，應交給 AI 處理。
     """
     text = text.strip()
-    for pattern, intent in KEYWORD_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
+    for pattern, intent in _COMPILED_PATTERNS:
+        if pattern.search(text):
             return intent
     return None

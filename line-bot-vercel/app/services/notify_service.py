@@ -49,8 +49,8 @@ def notify_admin(user_id: str, user_message: str, reason: str = "客人找你"):
         logger.error("Failed to notify admin: %s", e)
 
 
-def push_text_to_user(target_user_id: str, text: str):
-    """推送文字訊息給指定用戶（用於確認/拒絕預約時通知客人）。"""
+def push_text_to_user(target_user_id: str, text: str) -> bool:
+    """推送文字訊息給指定用戶（用於確認/拒絕預約時通知客人）。回傳是否成功。"""
     settings = get_settings()
     try:
         configuration = Configuration(access_token=settings.line_channel_access_token)
@@ -62,12 +62,14 @@ def push_text_to_user(target_user_id: str, text: str):
                     messages=[TextMessage(text=text)],
                 )
             )
+        return True
     except Exception as e:
         logger.error("Push to user %s failed: %s", target_user_id, e)
+        return False
 
 
-def push_flex_to_user(target_user_id: str, flex_dict: dict):
-    """推送 Flex Message 卡片給指定用戶（用於發送匯款資訊等）。"""
+def push_flex_to_user(target_user_id: str, flex_dict: dict) -> bool:
+    """推送 Flex Message 卡片給指定用戶（用於發送匯款資訊等）。回傳是否成功。"""
     settings = get_settings()
     try:
         configuration = Configuration(access_token=settings.line_channel_access_token)
@@ -84,8 +86,10 @@ def push_flex_to_user(target_user_id: str, flex_dict: dict):
                     ],
                 )
             )
+        return True
     except Exception as e:
         logger.error("Push flex to user %s failed: %s", target_user_id, e)
+        return False
 
 
 def notify_admin_flex(user_id: str, flex_dict: dict, prefix_text: str = ""):

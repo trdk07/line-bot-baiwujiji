@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# 本地開發用：Vercel 的 @vercel/python 直接跑 ASGI，不需要 uvicorn。
+uvicorn[standard]==0.30.6
+pytest
