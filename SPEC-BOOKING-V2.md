@@ -156,7 +156,67 @@ slot_datetime(date_str, time_str) -> datetime  # 含跨午夜換算（00:00 → 
 
 - **單檔** `public/booking.html`：vanilla JS + inline CSS，無框架、無 build step，行數預算 ≤ 450（含 CSS）。LIFF SDK 用官方 CDN `https://static.line-scdn.net/liff/edge/2/sdk.js`。
 - Vercel 靜態檔案優先於 rewrites（filesystem match 先於 rewrite），所以 `public/` 下的頁面與圖示會直接被伺服，現有 `vercel.json` 的 rewrite 不用改結構。
-- 配色沿用 bot tokens（CSS variables 宣告同一組 hex）。行動裝置優先（頁面只會在 LINE 內開啟）。
+- 行動裝置優先（頁面只會在 LINE 內開啟）。
+- **開發預覽模式**：URL 帶 `?mock=1`（或 liff.init 失敗）時載入假資料渲染整頁，
+  供業主在一般瀏覽器直接檢視視覺、也供不依賴 LIFF 的本機開發。
+
+### 3.1b 視覺設計規格（強制，與 Flex 卡片同一套設計語言）
+
+CSS variables 一比一沿用 bot 配色 tokens，**禁止出現此表以外的色值**
+（透明度變化除外，如 rgba 陰影）：
+
+```css
+:root {
+  --bg:        #EFEBE5;  /* BG_DARK    頁面底色 */
+  --bg-header: #3D1F1F;  /* BG_HEADER  頂欄深棕 */
+  --gold:      #C2A68C;  /* GOLD       點綴/可選時段/今日圈 */
+  --title:     #7B3F2A;  /* TEXT_TITLE 標題赤褐/選中日 */
+  --ink:       #4A453C;  /* TEXT_WHITE 主內文 */
+  --muted:     #6E675E;  /* TEXT_GREY  次要說明 */
+  --line:      #C8B8A8;  /* DIVIDER    格線/停用態 */
+  --accent:    #8B2020;  /* ACCENT_RED 主 CTA */
+  --sheet:     #FAF8F4;  /* 底部面板底色（BG_DARK 提亮一階，唯一新增的中性色）*/
+}
+```
+
+逐元件用色（客人模式）：
+
+| 元件 | 樣式 |
+|---|---|
+| 頂欄 | `--bg-header` 底、置中「百無禁忌研究所」`--gold`、副標「預約時段」`--line` xs；左右不放雜項 |
+| 月份導航 | 月份文字 `--title` 粗體（serif），前後月箭頭 `--gold`；月份文字兩側各一個 ✦（`--gold`, 小號） |
+| 星期列 | `--muted` xs |
+| 日期格（預設） | 文字 `--ink`；格子無邊框，乾淨留白 |
+| 今日 | `--gold` 細圓環（outline），文字不變 |
+| 有可約時段的日 | 日期下方 1–3 個 `--gold` 小圓點（時段數 ≥3 顯示 3 點） |
+| 當日全被約滿 | 圓點改 `--line`（灰點＝有開放但已滿，一目了然） |
+| 過去的日／未開放日 | 文字 `--line`，不可點 |
+| 選中的日 | `--title` 實心圓、文字 `--bg`（米色反白） |
+| 底部時段面板 | `--sheet` 底、上緣圓角 16px、頂部一條 `--line` 拖曳把手；標題「7/12（日）」`--title` serif 粗體＋✦ |
+| 可約時段 chip | `--gold` 實心、文字 `#FFFFFF`、圓角 8px（對齊 Flex 時段按鈕就是 GOLD 的慣例） |
+| 已被約走 chip | 透明底、`--line` 1px 邊框、文字 `--muted` 加刪除線、不可點 |
+| 確認列 | 「確認預約 7/12（日）15:00」按鈕 `--accent` 實心、文字白（對齊 Flex 主按鈕慣例）、上方一行 `--muted` xs 提示「送出後老師確認日期會再通知您」 |
+| 空狀態（本月無開放） | 置中 ✦＋「本月時段尚未開放，請稍候」`--muted` |
+
+老師編輯模式追加：
+
+| 元件 | 樣式 |
+|---|---|
+| 編輯開關 | 頂欄右側小型 toggle，開啟時 thumb `--gold`；編輯中頂欄下沿出現 2px `--gold` 提示線 |
+| 時段格點（開放中） | `--gold` 實心（同可約 chip） |
+| 時段格點（未開放） | 透明底 `--line` 虛線邊框、文字 `--muted` |
+| 已有預約而鎖定 | `--line` 實心、文字 `--muted`、右上角小鎖符號「⚿」或 ✦ 替代、點擊時 shake ＋ toast 說明 |
+| 儲存按鈕 | `--accent` 實心，固定底部；儲存成功 toast `--bg-header` 底 `--gold` 字「已更新 ✦」 |
+
+字體與質感：
+
+- 標題（頂欄、月份、面板日期）：serif 堆疊
+  `"Noto Serif TC","Songti TC","PMingLiU",serif`——**不載入 webfont**，
+  用系統字型退化即可，維持請帖感又不增加載入重量。
+- 內文/數字：系統 sans（`-apple-system, "PingFang TC", sans-serif`）。
+- 陰影極輕（`rgba(61,31,31,.08)` 一層即可）、圓角統一 8/16px 兩檔、
+  不用漸層、不用 emoji——裝飾一律用 ✦ 與細線，和卡片一致。
+- 動效只允許兩處：底部面板滑入（150ms ease-out）、chip 按下的 opacity 變化。
 
 ### 3.2 後端 API（新增 `app/routers/api.py`，掛進 main.py）
 
@@ -201,6 +261,9 @@ slot_datetime(date_str, time_str) -> datetime  # 含跨午夜換算（00:00 → 
 - [ ] 老師：開時段 → 客人端立即可見；嘗試關閉已被預約時段被擋下。
 - [ ] 非老師帶偽造 userId POST → 403。
 - [ ] `LIFF_ID` 未設定時文字流程照舊可用。
+- [ ] **視覺對照**：頁面上出現的每個色值都能對回 §3.1b 的 token 表；
+      `?mock=1` 模式截圖與 Flex 卡片並排比對，質感一致（同一品牌一眼可辨）。
+- [ ] 業主用手機瀏覽器開 `booking.html?mock=1` 確認視覺後才接 LIFF 上線。
 
 ---
 
