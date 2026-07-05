@@ -154,6 +154,55 @@ def mark_notified_bot_off(user_id: str):
         pass
 
 
+CLEAR_CONFIRM_TTL = 60  # /clear 二次確認有效秒數
+
+
+def set_clear_confirm_pending():
+    """標記 /clear 已發出，等待管理員在 60 秒內輸入 /clear yes 確認。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["SET", "clear_confirm_pending", "1", "EX", CLEAR_CONFIRM_TTL],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
+def has_clear_confirm_pending() -> bool:
+    """檢查是否有待確認的 /clear。"""
+    url = _get_kv_url()
+    if not url:
+        return False
+    try:
+        response = httpx.get(
+            f"{url}/get/clear_confirm_pending",
+            headers=_get_kv_headers(),
+            timeout=3.0,
+        )
+        return response.json().get("result") == "1"
+    except Exception:
+        return False
+
+
+def clear_confirm_pending():
+    """清除 /clear 二次確認狀態。"""
+    url = _get_kv_url()
+    if not url:
+        return
+    try:
+        httpx.post(
+            url, headers=_get_kv_headers(),
+            json=["DEL", "clear_confirm_pending"],
+            timeout=3.0,
+        )
+    except Exception:
+        pass
+
+
 # ============================================================
 # 預約原則：記住用戶是否已看過
 # ============================================================

@@ -49,6 +49,7 @@ from app.services.state_service import (
     update_booking_datetime, update_done_booking_datetime,
     set_intake_pending, has_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
+    set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -462,7 +463,7 @@ def handle_text_message(event: MessageEvent):
         return
 
     # ----------------------------------------------------------
-    # 管理員 /clear：一次清除所有預約
+    # 管理員 /clear：一次清除所有預約（需二次確認，避免誤觸）
     # ----------------------------------------------------------
     if intent == "booking_clear":
         if is_admin(user_id):
@@ -472,6 +473,22 @@ def handle_text_message(event: MessageEvent):
                 return
 
             count = len(all_bookings)
+            confirmed = bool(re.search(r"yes\s*$", user_text, re.IGNORECASE))
+
+            if not confirmed:
+                set_clear_confirm_pending()
+                reply_text(
+                    event,
+                    f"⚠️ 即將清除全部 {count} 筆預約，此動作無法復原。\n\n"
+                    f"確認請在 60 秒內輸入 /clear yes",
+                )
+                return
+
+            if not has_clear_confirm_pending():
+                reply_text(event, "確認已逾時，請重新輸入 /clear。")
+                return
+
+            clear_confirm_pending()
             for e in all_bookings:
                 delete_booking(e["ref"])
             reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")

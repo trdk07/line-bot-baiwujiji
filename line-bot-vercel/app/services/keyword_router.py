@@ -15,7 +15,7 @@ KEYWORD_PATTERNS = [
     (r"^/no(\s+\d+)?$", "booking_no"),
     (r"^/paid(\s+\d+)?$", "booking_paid"),
     (r"^/list$", "booking_list"),
-    (r"^/clear$", "booking_clear"),
+    (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
     (r"^/myid$", "get_my_id"),
 
