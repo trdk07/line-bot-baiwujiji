@@ -100,14 +100,15 @@ def _generate_slot_times(date: datetime) -> list:
     return all_slots
 
 
-def _filter_taken_and_past(slot_strs: list, date: datetime, taken: set) -> list:
-    """套用軟鎖定（進行中預約佔用）與今日已過去時段的過濾。"""
-    slot_strs = [t for t in slot_strs if t not in taken]
+def _filter_taken_and_past(slots: list, taken: set) -> list:
+    """
+    套用軟鎖定（進行中預約佔用）與已過去時段的過濾。
+    slots: [(datetime, "HH:MM"), ...]。
+    用完整 datetime（而非時間字串）比較「是否已過去」，
+    避免跨午夜時段（例如隔天 00:00）被字串比較誤判為已過去。
+    """
     now = datetime.now(TW_TZ)
-    if date.date() == now.date():
-        current_time = now.strftime("%H:%M")
-        slot_strs = [t for t in slot_strs if t > current_time]
-    return slot_strs
+    return [s for dt, s in slots if s not in taken and dt > now]
 
 
 def get_available_slots(date_str: str) -> list:
@@ -130,8 +131,8 @@ def get_available_slots(date_str: str) -> list:
 
     # 如果沒有 Google Calendar，直接回傳所有時段（扣除軟鎖定）
     if not service or not settings.google_calendar_id:
-        slot_strs = [s.strftime("%H:%M") for s in all_slots]
-        return _filter_taken_and_past(slot_strs, date, taken)
+        slots = [(s, s.strftime("%H:%M")) for s in all_slots]
+        return _filter_taken_and_past(slots, taken)
 
     try:
         # 查詢範圍：當天最早到隔天凌晨（涵蓋跨午夜時段）
@@ -156,15 +157,15 @@ def get_available_slots(date_str: str) -> list:
                 for b in busy_times
             )
             if not is_busy:
-                available.append(slot.strftime("%H:%M"))
+                available.append((slot, slot.strftime("%H:%M")))
 
-        return _filter_taken_and_past(available, date, taken)
+        return _filter_taken_and_past(available, taken)
 
     except Exception as e:
         logger.error("FreeBusy query error: %s", e, exc_info=True)
         # API 失敗時降級：回傳所有時段（仍扣除軟鎖定），避免誤顯示「已約滿」
-        slot_strs = [s.strftime("%H:%M") for s in all_slots]
-        return _filter_taken_and_past(slot_strs, date, taken)
+        slots = [(s, s.strftime("%H:%M")) for s in all_slots]
+        return _filter_taken_and_past(slots, taken)
 
 
 def create_event(date_str: str, time_str: str, customer_name: str) -> tuple[bool, str, str]:
