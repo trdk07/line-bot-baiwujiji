@@ -322,7 +322,7 @@ def handle_text_message(event: MessageEvent):
             clear_intake_pending(ctx_user)
 
             # 推送匯款 QR Code 卡片給客人
-            push_flex_to_user(
+            push_ok = push_flex_to_user(
                 ctx_user,
                 fm.payment_info_card(
                     date_label,
@@ -331,11 +331,16 @@ def handle_text_message(event: MessageEvent):
                 ),
             )
 
+            push_status = (
+                "匯款資訊已發送給客人，等待匯款回報。"
+                if push_ok
+                else "⚠️ 推送給客人失敗，請手動聯繫客人告知匯款資訊。"
+            )
             reply_text(
                 event,
                 f"✅ 已確認 {booking['n']} 的日期\n"
                 f"{date_label} {booking['t']}\n\n"
-                f"匯款資訊已發送給客人，等待匯款回報。"
+                f"{push_status}"
             )
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
@@ -360,13 +365,14 @@ def handle_text_message(event: MessageEvent):
             date_label = format_date_label(booking["d"])
 
             # 通知客人
-            push_text_to_user(
+            push_ok = push_text_to_user(
                 ctx_user,
                 f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
                 f"請輸入「我要預約」重新選擇其他時間 🙏"
             )
 
-            reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約")
+            push_status = "" if push_ok else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
+            reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約{push_status}")
             delete_booking(ref)
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
@@ -401,7 +407,7 @@ def handle_text_message(event: MessageEvent):
             clear_intake_data(ctx_user)
 
             # 通知客人：預約確認卡片
-            push_flex_to_user(
+            push_ok = push_flex_to_user(
                 ctx_user,
                 fm.booking_confirmed_card(
                     booking["n"], date_label, booking["t"],
@@ -417,11 +423,13 @@ def handle_text_message(event: MessageEvent):
                 cal_status = "行事曆已建立 📅"
             else:
                 cal_status = f"⚠️ 行事曆建立失敗\n原因：{cal_error}\n請手動新增"
+            push_status = "" if push_ok else "\n⚠️ 推送確認卡片給客人失敗，請手動聯繫客人。"
             reply_text(
                 event,
                 f"✅ 已完成 {booking['n']} 的預約\n"
                 f"{date_label} {booking['t']}\n"
                 f"{cal_status}"
+                f"{push_status}"
             )
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
@@ -547,14 +555,16 @@ def handle_text_message(event: MessageEvent):
                 cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
                 cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
 
-            push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
+            push_ok = push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
+            push_status = "" if push_ok else "\n⚠️ 推送改期通知給客人失敗，請手動聯繫客人。"
 
             reply_text(
                 event,
                 f"✅ 已改期 {booking['n']}\n"
                 f"原：{old_date_label} {old_time}\n"
                 f"新：{new_date_label} {new_time}"
-                f"{cal_status}",
+                f"{cal_status}"
+                f"{push_status}",
             )
         else:
             reply_text(event, "只有管理員可以使用這個指令。")
