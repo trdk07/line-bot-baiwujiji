@@ -2,7 +2,7 @@
 LINE Webhook 路由 — 預約 + 付款確認三步機制。
 
 訊息處理流程：
-[第零層] 管理員指令（/off /on /ok /no /paid /myid）
+[第零層] 管理員指令（/off /on /ok /no /paid /list /clear /change /myid）
 [      ] Bot 開關檢查
 [第一層] 關鍵字比對 → 固定回應（0 Token）
   ├── 預約流程：原則說明（首次）→ 日期 → 時段 → 等待確認
@@ -201,6 +201,297 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
 
 
 # ============================================================
+# 管理員指令（需 is_admin 通過才會被呼叫，見 ADMIN_COMMANDS 對照表）
+# ============================================================
+def _cmd_bot_off(event, user_id, text):
+    set_bot_active(False)
+    reply_text(event, "🔴 Bot 已關閉，小夏老師親自接管。")
+
+
+def _cmd_bot_on(event, user_id, text):
+    set_bot_active(True)
+    reply_text(event, "🟢 Bot 已開啟，助理恢復上班。")
+
+
+def _cmd_booking_ok(event, user_id, text):
+    """確認日期可以 → 自動發匯款資訊給客人。"""
+    num = _parse_booking_number(text)
+    ctx_user, booking, ref = _pick_booking(
+        "pending", num, event,
+        "目前沒有待確認日期的預約。",
+    )
+    if not ctx_user:
+        return
+
+    date_label = format_date_label(booking["d"])
+
+    # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
+    ok = update_booking_status(ref, "awaiting_payment", booking)
+    if not ok:
+        # KV 寫入失敗：立即告知管理員，不繼續後續流程
+        reply_text(
+            event,
+            f"⚠️ 系統錯誤：{booking['n']} 的預約狀態更新失敗（KV 寫入異常）。\n\n"
+            f"請稍後再試一次 /ok，或直接手動通知客人匯款資訊。"
+        )
+        return
+
+    # 付款流程開始，清除諮詢資料等待狀態（避免客人問 QR Code 被誤抓）
+    clear_intake_pending(ctx_user)
+
+    # 推送匯款 QR Code 卡片給客人
+    push_ok = push_flex_to_user(
+        ctx_user,
+        fm.payment_info_card(
+            date_label,
+            booking["t"],
+            settings.payment_qr_image_url,
+        ),
+    )
+
+    push_status = (
+        "匯款資訊已發送給客人，等待匯款回報。"
+        if push_ok
+        else "⚠️ 推送給客人失敗，請手動聯繫客人告知匯款資訊。"
+    )
+    reply_text(
+        event,
+        f"✅ 已確認 {booking['n']} 的日期\n"
+        f"{date_label} {booking['t']}\n\n"
+        f"{push_status}"
+    )
+
+
+def _cmd_booking_no(event, user_id, text):
+    """婉拒預約（支援 pending 與 awaiting_payment 狀態）。"""
+    num = _parse_booking_number(text)
+    # 先找 pending，找不到再找 awaiting_payment
+    ctx_user, booking, ref = _pick_booking("pending", num, event, None)
+    if not ctx_user:
+        ctx_user, booking, ref = _pick_booking(
+            "awaiting_payment", num, event,
+            "目前沒有待處理的預約。",
+        )
+    if not ctx_user:
+        return
+
+    date_label = format_date_label(booking["d"])
+
+    # 通知客人
+    push_ok = push_text_to_user(
+        ctx_user,
+        f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
+        f"請輸入「我要預約」重新選擇其他時間 🙏"
+    )
+
+    push_status = "" if push_ok else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
+    reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約{push_status}")
+    delete_booking(ref)
+
+
+def _cmd_booking_paid(event, user_id, text):
+    """
+    確認收到款項 → 建立日曆事件 → 完成預約。
+    優先處理 payment_reported（客人已主動回報），
+    fallback 到 awaiting_payment（客人未回報但管理員已確認收款）。
+    """
+    num = _parse_booking_number(text)
+    # 先找 payment_reported（正常流程）
+    ctx_user, booking, ref = _pick_booking("payment_reported", num, event, None)
+    if not ctx_user:
+        # Fallback：找 awaiting_payment（KV 寫入失敗或客人未回報的容錯）
+        ctx_user, booking, ref = _pick_booking(
+            "awaiting_payment", num, event,
+            "目前沒有待確認收款的預約。\n（客人需先回報「已匯款」，或款項尚未確認）",
+        )
+    if not ctx_user:
+        return
+
+    date_label = format_date_label(booking["d"])
+
+    # 建立 Google Calendar 事件
+    cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
+
+    # 取得諮詢資料（出生年月日、問題）
+    intake_birth, intake_question = get_intake_data(ctx_user)
+    clear_intake_data(ctx_user)
+
+    # 通知客人：預約確認卡片
+    push_ok = push_flex_to_user(
+        ctx_user,
+        fm.booking_confirmed_card(
+            booking["n"], date_label, booking["t"],
+            birth_date=intake_birth, question=intake_question,
+        ),
+    )
+
+    # 完成後存入 done 區（供改期使用）
+    save_done_booking(ref, booking, cal_event_id)
+    delete_booking(ref)
+
+    if cal_ok:
+        cal_status = "行事曆已建立 📅"
+    else:
+        cal_status = f"⚠️ 行事曆建立失敗\n原因：{cal_error}\n請手動新增"
+    push_status = "" if push_ok else "\n⚠️ 推送確認卡片給客人失敗，請手動聯繫客人。"
+    reply_text(
+        event,
+        f"✅ 已完成 {booking['n']} 的預約\n"
+        f"{date_label} {booking['t']}\n"
+        f"{cal_status}"
+        f"{push_status}"
+    )
+
+
+def _cmd_booking_list(event, user_id, text):
+    """顯示所有狀態的預約總覽。"""
+    all_bookings = get_all_queue_bookings()
+    if not all_bookings:
+        reply_text(event, "📋 目前沒有任何進行中的預約。")
+        return
+
+    STATUS_LABEL = {
+        "pending": "⏳待確認",
+        "awaiting_payment": "💳待匯款",
+        "payment_reported": "💰已回報",
+    }
+    lines = [f"📋 目前共 {len(all_bookings)} 筆預約：\n"]
+    for i, e in enumerate(all_bookings, 1):
+        b = e["booking"]
+        date_label = format_date_label(b["d"])
+        status = STATUS_LABEL.get(b["s"], b["s"])
+        lines.append(f"  {i}. {b['n']}｜{date_label} {b['t']}｜{status}")
+    reply_text(event, "\n".join(lines))
+
+
+def _cmd_booking_clear(event, user_id, text):
+    """一次清除所有預約（需二次確認，避免誤觸）。"""
+    all_bookings = get_all_queue_bookings()
+    if not all_bookings:
+        reply_text(event, "📋 目前沒有任何預約需要清除。")
+        return
+
+    count = len(all_bookings)
+    confirmed = bool(re.search(r"yes\s*$", text, re.IGNORECASE))
+
+    if not confirmed:
+        set_clear_confirm_pending()
+        reply_text(
+            event,
+            f"⚠️ 即將清除全部 {count} 筆預約，此動作無法復原。\n\n"
+            f"確認請在 60 秒內輸入 /clear yes",
+        )
+        return
+
+    if not has_clear_confirm_pending():
+        reply_text(event, "確認已逾時，請重新輸入 /clear。")
+        return
+
+    clear_confirm_pending()
+    for e in all_bookings:
+        delete_booking(e["ref"])
+    reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")
+
+
+def _cmd_booking_change(event, user_id, text):
+    """改期（付款前後皆可）。"""
+    m = re.search(
+        r"/change\s+(?:(\d+)\s+)?(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
+        text,
+    )
+    if not m:
+        reply_text(
+            event,
+            "格式錯誤，請用：\n"
+            "/change YYYY-MM-DD HH:MM\n"
+            "或指定編號：/change 1 YYYY-MM-DD HH:MM",
+        )
+        return
+
+    num_str, new_date, new_time = m.group(1), m.group(2), m.group(3)
+    num = int(num_str) if num_str else None
+
+    all_active = get_all_queue_bookings()
+    all_done = get_all_done_bookings()
+    all_entries = all_active + all_done
+
+    if not all_entries:
+        reply_text(event, "目前沒有任何預約可以改期。")
+        return
+
+    STATUS_ICON = {
+        "pending": "⏳", "awaiting_payment": "💳",
+        "payment_reported": "💰", "done": "✅",
+    }
+
+    if num is None and len(all_entries) == 1:
+        entry = all_entries[0]
+    elif num is None:
+        lines = [f"目前有 {len(all_entries)} 筆預約，請加編號：\n"]
+        for i, e in enumerate(all_entries, 1):
+            b = e["booking"]
+            icon = STATUS_ICON.get(b["s"], "")
+            lines.append(f"  {i}. {b['n']}｜{format_date_label(b['d'])} {b['t']} {icon}")
+        lines.append(f"\n例如：/change 1 {new_date} {new_time}")
+        reply_text(event, "\n".join(lines))
+        return
+    else:
+        idx = num - 1
+        if 0 <= idx < len(all_entries):
+            entry = all_entries[idx]
+        else:
+            reply_text(event, f"編號 {num} 不存在，目前只有 {len(all_entries)} 筆。")
+            return
+
+    booking = entry["booking"]
+    ref = entry["ref"]
+    ctx_user = entry["user_id"]
+    is_done = booking.get("s") == "done"
+
+    old_date_label = format_date_label(booking["d"])
+    old_time = booking["t"]
+    new_date_label = format_date_label(new_date)
+
+    if is_done:
+        ok = update_done_booking_datetime(ref, new_date, new_time, booking)
+    else:
+        ok = update_booking_datetime(ref, new_date, new_time, booking)
+
+    if not ok:
+        reply_text(event, "⚠️ 系統錯誤：預約時間更新失敗，請稍後再試。")
+        return
+
+    cal_status = ""
+    if is_done and booking.get("cal_id"):
+        cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
+        cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
+
+    push_ok = push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
+    push_status = "" if push_ok else "\n⚠️ 推送改期通知給客人失敗，請手動聯繫客人。"
+
+    reply_text(
+        event,
+        f"✅ 已改期 {booking['n']}\n"
+        f"原：{old_date_label} {old_time}\n"
+        f"新：{new_date_label} {new_time}"
+        f"{cal_status}"
+        f"{push_status}",
+    )
+
+
+ADMIN_COMMANDS = {
+    "bot_off": _cmd_bot_off,
+    "bot_on": _cmd_bot_on,
+    "booking_ok": _cmd_booking_ok,
+    "booking_no": _cmd_booking_no,
+    "booking_paid": _cmd_booking_paid,
+    "booking_list": _cmd_booking_list,
+    "booking_clear": _cmd_booking_clear,
+    "booking_change": _cmd_booking_change,
+}
+
+
+# ============================================================
 # 意圖 → 回應 對照表（簡單的一對一回應）
 # ============================================================
 INTENT_HANDLERS = {
@@ -273,318 +564,15 @@ def handle_text_message(event: MessageEvent):
     # === 第零層：管理員指令（不受 Bot 開關影響）===
     intent = match_keyword(user_text)
 
-    if intent == "bot_off":
-        if is_admin(user_id):
-            set_bot_active(False)
-            reply_text(event, "🔴 Bot 已關閉，小夏老師親自接管。")
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    if intent == "bot_on":
-        if is_admin(user_id):
-            set_bot_active(True)
-            reply_text(event, "🟢 Bot 已開啟，助理恢復上班。")
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
     if intent == "get_my_id":
         reply_text(event, f"你的 LINE User ID：\n{user_id}")
         return
 
-    # ----------------------------------------------------------
-    # 管理員 /ok：確認日期可以 → 自動發匯款資訊給客人
-    # ----------------------------------------------------------
-    if intent == "booking_ok":
-        if is_admin(user_id):
-            num = _parse_booking_number(user_text)
-            ctx_user, booking, ref = _pick_booking(
-                "pending", num, event,
-                "目前沒有待確認日期的預約。",
-            )
-            if not ctx_user:
-                return
-
-            date_label = format_date_label(booking["d"])
-
-            # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
-            ok = update_booking_status(ref, "awaiting_payment", booking)
-            if not ok:
-                # KV 寫入失敗：立即告知管理員，不繼續後續流程
-                reply_text(
-                    event,
-                    f"⚠️ 系統錯誤：{booking['n']} 的預約狀態更新失敗（KV 寫入異常）。\n\n"
-                    f"請稍後再試一次 /ok，或直接手動通知客人匯款資訊。"
-                )
-                return
-
-            # 付款流程開始，清除諮詢資料等待狀態（避免客人問 QR Code 被誤抓）
-            clear_intake_pending(ctx_user)
-
-            # 推送匯款 QR Code 卡片給客人
-            push_ok = push_flex_to_user(
-                ctx_user,
-                fm.payment_info_card(
-                    date_label,
-                    booking["t"],
-                    settings.payment_qr_image_url,
-                ),
-            )
-
-            push_status = (
-                "匯款資訊已發送給客人，等待匯款回報。"
-                if push_ok
-                else "⚠️ 推送給客人失敗，請手動聯繫客人告知匯款資訊。"
-            )
-            reply_text(
-                event,
-                f"✅ 已確認 {booking['n']} 的日期\n"
-                f"{date_label} {booking['t']}\n\n"
-                f"{push_status}"
-            )
-        else:
+    if intent in ADMIN_COMMANDS:
+        if not is_admin(user_id):
             reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    # ----------------------------------------------------------
-    # 管理員 /no：婉拒預約（支援 pending 與 awaiting_payment 狀態）
-    # ----------------------------------------------------------
-    if intent == "booking_no":
-        if is_admin(user_id):
-            num = _parse_booking_number(user_text)
-            # 先找 pending，找不到再找 awaiting_payment
-            ctx_user, booking, ref = _pick_booking("pending", num, event, None)
-            if not ctx_user:
-                ctx_user, booking, ref = _pick_booking(
-                    "awaiting_payment", num, event,
-                    "目前沒有待處理的預約。",
-                )
-            if not ctx_user:
-                return
-
-            date_label = format_date_label(booking["d"])
-
-            # 通知客人
-            push_ok = push_text_to_user(
-                ctx_user,
-                f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
-                f"請輸入「我要預約」重新選擇其他時間 🙏"
-            )
-
-            push_status = "" if push_ok else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
-            reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約{push_status}")
-            delete_booking(ref)
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    # ----------------------------------------------------------
-    # 管理員 /paid：確認收到款項 → 建立日曆事件 → 完成預約
-    # 優先處理 payment_reported（客人已主動回報），
-    # fallback 到 awaiting_payment（客人未回報但管理員已確認收款）。
-    # ----------------------------------------------------------
-    if intent == "booking_paid":
-        if is_admin(user_id):
-            num = _parse_booking_number(user_text)
-            # 先找 payment_reported（正常流程）
-            ctx_user, booking, ref = _pick_booking("payment_reported", num, event, None)
-            if not ctx_user:
-                # Fallback：找 awaiting_payment（KV 寫入失敗或客人未回報的容錯）
-                ctx_user, booking, ref = _pick_booking(
-                    "awaiting_payment", num, event,
-                    "目前沒有待確認收款的預約。\n（客人需先回報「已匯款」，或款項尚未確認）",
-                )
-            if not ctx_user:
-                return
-
-            date_label = format_date_label(booking["d"])
-
-            # 建立 Google Calendar 事件
-            cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
-
-            # 取得諮詢資料（出生年月日、問題）
-            intake_birth, intake_question = get_intake_data(ctx_user)
-            clear_intake_data(ctx_user)
-
-            # 通知客人：預約確認卡片
-            push_ok = push_flex_to_user(
-                ctx_user,
-                fm.booking_confirmed_card(
-                    booking["n"], date_label, booking["t"],
-                    birth_date=intake_birth, question=intake_question,
-                ),
-            )
-
-            # 完成後存入 done 區（供改期使用）
-            save_done_booking(ref, booking, cal_event_id)
-            delete_booking(ref)
-
-            if cal_ok:
-                cal_status = "行事曆已建立 📅"
-            else:
-                cal_status = f"⚠️ 行事曆建立失敗\n原因：{cal_error}\n請手動新增"
-            push_status = "" if push_ok else "\n⚠️ 推送確認卡片給客人失敗，請手動聯繫客人。"
-            reply_text(
-                event,
-                f"✅ 已完成 {booking['n']} 的預約\n"
-                f"{date_label} {booking['t']}\n"
-                f"{cal_status}"
-                f"{push_status}"
-            )
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    # ----------------------------------------------------------
-    # 管理員 /list：顯示所有狀態的預約總覽
-    # ----------------------------------------------------------
-    if intent == "booking_list":
-        if is_admin(user_id):
-            all_bookings = get_all_queue_bookings()
-            if not all_bookings:
-                reply_text(event, "📋 目前沒有任何進行中的預約。")
-                return
-
-            STATUS_LABEL = {
-                "pending": "⏳待確認",
-                "awaiting_payment": "💳待匯款",
-                "payment_reported": "💰已回報",
-            }
-            lines = [f"📋 目前共 {len(all_bookings)} 筆預約：\n"]
-            for i, e in enumerate(all_bookings, 1):
-                b = e["booking"]
-                date_label = format_date_label(b["d"])
-                status = STATUS_LABEL.get(b["s"], b["s"])
-                lines.append(f"  {i}. {b['n']}｜{date_label} {b['t']}｜{status}")
-            reply_text(event, "\n".join(lines))
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    # ----------------------------------------------------------
-    # 管理員 /clear：一次清除所有預約（需二次確認，避免誤觸）
-    # ----------------------------------------------------------
-    if intent == "booking_clear":
-        if is_admin(user_id):
-            all_bookings = get_all_queue_bookings()
-            if not all_bookings:
-                reply_text(event, "📋 目前沒有任何預約需要清除。")
-                return
-
-            count = len(all_bookings)
-            confirmed = bool(re.search(r"yes\s*$", user_text, re.IGNORECASE))
-
-            if not confirmed:
-                set_clear_confirm_pending()
-                reply_text(
-                    event,
-                    f"⚠️ 即將清除全部 {count} 筆預約，此動作無法復原。\n\n"
-                    f"確認請在 60 秒內輸入 /clear yes",
-                )
-                return
-
-            if not has_clear_confirm_pending():
-                reply_text(event, "確認已逾時，請重新輸入 /clear。")
-                return
-
-            clear_confirm_pending()
-            for e in all_bookings:
-                delete_booking(e["ref"])
-            reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
-        return
-
-    # ----------------------------------------------------------
-    # 管理員 /change：改期（付款前後皆可）
-    # ----------------------------------------------------------
-    if intent == "booking_change":
-        if is_admin(user_id):
-            m = re.search(
-                r"/change\s+(?:(\d+)\s+)?(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})",
-                user_text,
-            )
-            if not m:
-                reply_text(
-                    event,
-                    "格式錯誤，請用：\n"
-                    "/change YYYY-MM-DD HH:MM\n"
-                    "或指定編號：/change 1 YYYY-MM-DD HH:MM",
-                )
-                return
-
-            num_str, new_date, new_time = m.group(1), m.group(2), m.group(3)
-            num = int(num_str) if num_str else None
-
-            all_active = get_all_queue_bookings()
-            all_done = get_all_done_bookings()
-            all_entries = all_active + all_done
-
-            if not all_entries:
-                reply_text(event, "目前沒有任何預約可以改期。")
-                return
-
-            STATUS_ICON = {
-                "pending": "⏳", "awaiting_payment": "💳",
-                "payment_reported": "💰", "done": "✅",
-            }
-
-            if num is None and len(all_entries) == 1:
-                entry = all_entries[0]
-            elif num is None:
-                lines = [f"目前有 {len(all_entries)} 筆預約，請加編號：\n"]
-                for i, e in enumerate(all_entries, 1):
-                    b = e["booking"]
-                    icon = STATUS_ICON.get(b["s"], "")
-                    lines.append(f"  {i}. {b['n']}｜{format_date_label(b['d'])} {b['t']} {icon}")
-                lines.append(f"\n例如：/change 1 {new_date} {new_time}")
-                reply_text(event, "\n".join(lines))
-                return
-            else:
-                idx = num - 1
-                if 0 <= idx < len(all_entries):
-                    entry = all_entries[idx]
-                else:
-                    reply_text(event, f"編號 {num} 不存在，目前只有 {len(all_entries)} 筆。")
-                    return
-
-            booking = entry["booking"]
-            ref = entry["ref"]
-            ctx_user = entry["user_id"]
-            is_done = booking.get("s") == "done"
-
-            old_date_label = format_date_label(booking["d"])
-            old_time = booking["t"]
-            new_date_label = format_date_label(new_date)
-
-            if is_done:
-                ok = update_done_booking_datetime(ref, new_date, new_time, booking)
-            else:
-                ok = update_booking_datetime(ref, new_date, new_time, booking)
-
-            if not ok:
-                reply_text(event, "⚠️ 系統錯誤：預約時間更新失敗，請稍後再試。")
-                return
-
-            cal_status = ""
-            if is_done and booking.get("cal_id"):
-                cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
-                cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
-
-            push_ok = push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
-            push_status = "" if push_ok else "\n⚠️ 推送改期通知給客人失敗，請手動聯繫客人。"
-
-            reply_text(
-                event,
-                f"✅ 已改期 {booking['n']}\n"
-                f"原：{old_date_label} {old_time}\n"
-                f"新：{new_date_label} {new_time}"
-                f"{cal_status}"
-                f"{push_status}",
-            )
-        else:
-            reply_text(event, "只有管理員可以使用這個指令。")
+            return
+        ADMIN_COMMANDS[intent](event, user_id, user_text)
         return
 
     # === Bot 開關檢查 ===
