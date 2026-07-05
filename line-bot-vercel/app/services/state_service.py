@@ -12,6 +12,8 @@
 import json
 import logging
 import time
+from typing import Any
+
 import httpx
 from app.config import get_settings
 
@@ -36,6 +38,31 @@ def _get_kv_headers() -> dict:
 def _get_kv_url() -> str:
     settings = get_settings()
     return settings.kv_rest_api_url
+
+
+def kv_cmd(*args) -> Any:
+    """
+    送出單一 Redis 指令（Upstash REST POST /）。
+    例如 kv_cmd("SET", "key", "val", "EX", 60)、kv_cmd("DEL", "key")。
+    KV 未設定、HTTP 非 200、或例外時皆回傳 None 並記錄錯誤。
+    """
+    url = _get_kv_url()
+    if not url:
+        return None
+    try:
+        response = httpx.post(url, headers=_get_kv_headers(), json=list(args), timeout=3.0)
+        if response.status_code != 200:
+            logger.error("KV command %s failed, HTTP %d: %s", args[0] if args else "?", response.status_code, response.text)
+            return None
+        return response.json().get("result")
+    except Exception as e:
+        logger.error("KV command %s error: %s", args[0] if args else "?", e)
+        return None
+
+
+def kv_get(key: str) -> str | None:
+    """語法糖：kv_cmd("GET", key)。"""
+    return kv_cmd("GET", key)
 
 
 def _pipeline(commands: list) -> list:
@@ -69,51 +96,21 @@ def _pipeline(commands: list) -> list:
 # ============================================================
 def is_bot_active() -> bool:
     """檢查 Bot 是否在運作中。預設為 True（開啟）。"""
-    url = _get_kv_url()
-    if not url:
-        return True
-
-    try:
-        response = httpx.get(
-            f"{url}/get/{KV_KEY_BOT_ACTIVE}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        result = response.json().get("result")
-        if result is None:
-            return True
-        return result != "off"
-    except Exception as e:
-        logger.error("KV read error: %s", e)
-        return True
+    return kv_get(KV_KEY_BOT_ACTIVE) != "off"
 
 
 def set_bot_active(active: bool):
     """設定 Bot 開關狀態。開啟時自動清除所有「老師在線」已通知紀錄。"""
-    url = _get_kv_url()
-    if not url:
+    if not _get_kv_url():
         logger.warning("KV not configured, cannot set bot state")
         return
 
     value = "on" if active else "off"
-    try:
-        httpx.get(
-            f"{url}/set/{KV_KEY_BOT_ACTIVE}/{value}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        logger.info("Bot state set to: %s", value)
+    kv_cmd("SET", KV_KEY_BOT_ACTIVE, value)
+    logger.info("Bot state set to: %s", value)
 
-        # 開啟 Bot 時，清除「老師在線」通知計數器
-        if active:
-            httpx.post(
-                url,
-                headers=_get_kv_headers(),
-                json=["DEL", "bot_off_notified"],
-                timeout=3.0,
-            )
-    except Exception as e:
-        logger.error("KV write error: %s", e)
+    if active:
+        kv_cmd("DEL", "bot_off_notified")
 
 
 # ============================================================
@@ -121,37 +118,12 @@ def set_bot_active(active: bool):
 # ============================================================
 def has_been_notified_bot_off(user_id: str) -> bool:
     """檢查該用戶是否已經收過「老師在線」通知（本次關閉期間）。"""
-    url = _get_kv_url()
-    if not url:
-        return False
-
-    try:
-        response = httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["SISMEMBER", "bot_off_notified", user_id],
-            timeout=3.0,
-        )
-        return response.json().get("result") == 1
-    except Exception:
-        return False
+    return kv_cmd("SISMEMBER", "bot_off_notified", user_id) == 1
 
 
 def mark_notified_bot_off(user_id: str):
     """標記該用戶已收過「老師在線」通知。"""
-    url = _get_kv_url()
-    if not url:
-        return
-
-    try:
-        httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["SADD", "bot_off_notified", user_id],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("SADD", "bot_off_notified", user_id)
 
 
 CLEAR_CONFIRM_TTL = 60  # /clear 二次確認有效秒數
@@ -159,48 +131,17 @@ CLEAR_CONFIRM_TTL = 60  # /clear 二次確認有效秒數
 
 def set_clear_confirm_pending():
     """標記 /clear 已發出，等待管理員在 60 秒內輸入 /clear yes 確認。"""
-    url = _get_kv_url()
-    if not url:
-        return
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["SET", "clear_confirm_pending", "1", "EX", CLEAR_CONFIRM_TTL],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("SET", "clear_confirm_pending", "1", "EX", CLEAR_CONFIRM_TTL)
 
 
 def has_clear_confirm_pending() -> bool:
     """檢查是否有待確認的 /clear。"""
-    url = _get_kv_url()
-    if not url:
-        return False
-    try:
-        response = httpx.get(
-            f"{url}/get/clear_confirm_pending",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        return response.json().get("result") == "1"
-    except Exception:
-        return False
+    return kv_get("clear_confirm_pending") == "1"
 
 
 def clear_confirm_pending():
     """清除 /clear 二次確認狀態。"""
-    url = _get_kv_url()
-    if not url:
-        return
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["DEL", "clear_confirm_pending"],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("DEL", "clear_confirm_pending")
 
 
 # ============================================================
@@ -208,36 +149,12 @@ def clear_confirm_pending():
 # ============================================================
 def has_seen_principles(user_id: str) -> bool:
     """檢查用戶是否已看過預約原則說明。"""
-    url = _get_kv_url()
-    if not url:
-        return False
-
-    try:
-        response = httpx.get(
-            f"{url}/get/principles:{user_id}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        result = response.json().get("result")
-        return result == "seen"
-    except Exception:
-        return False
+    return kv_get(f"principles:{user_id}") == "seen"
 
 
 def set_seen_principles(user_id: str):
     """記錄用戶已看過預約原則說明。"""
-    url = _get_kv_url()
-    if not url:
-        return
-
-    try:
-        httpx.get(
-            f"{url}/set/principles:{user_id}/seen",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("SET", f"principles:{user_id}", "seen")
 
 
 # ============================================================
@@ -263,7 +180,6 @@ def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
     ])
 
 
-
 def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
     """
     更新預約狀態（pending → awaiting_payment → payment_reported）。
@@ -272,52 +188,17 @@ def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
     回傳 True 代表寫入成功，False 代表失敗。
     """
     if not booking:
-        url = _get_kv_url()
-        if not url:
+        raw = kv_get(f"booking:{ref}")
+        if not raw:
             return False
         try:
-            response = httpx.get(
-                f"{url}/get/booking:{ref}",
-                headers=_get_kv_headers(),
-                timeout=3.0,
-            )
-            result = response.json().get("result")
-            if not result:
-                return False
-            booking = json.loads(result)
-        except Exception:
+            booking = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
             return False
-    if not booking:
-        return False
 
     booking["s"] = status
-    url = _get_kv_url()
-    if not url:
-        return False
-
     data = json.dumps(booking, ensure_ascii=False)
-    try:
-        response = httpx.post(
-            url,
-            headers=_get_kv_headers(),
-            json=["SET", f"booking:{ref}", data],
-            timeout=3.0,
-        )
-        if response.status_code != 200:
-            logger.error(
-                "KV SET booking status failed, HTTP %d: %s",
-                response.status_code,
-                response.text,
-            )
-            return False
-        result = response.json()
-        if result.get("result") != "OK":
-            logger.error("KV SET booking status unexpected result: %s", result)
-            return False
-        return True
-    except Exception as e:
-        logger.error("Update booking status error: %s", e)
-        return False
+    return kv_cmd("SET", f"booking:{ref}", data) == "OK"
 
 
 def delete_booking(ref: str):
@@ -327,7 +208,6 @@ def delete_booking(ref: str):
         ["LREM", "booking_queue", 0, ref],
         ["DEL", "admin_context"],  # 清除舊版殘留，避免殭屍資料
     ])
-
 
 
 def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
@@ -400,54 +280,24 @@ def get_user_booking_by_status(user_id: str, status: str) -> dict | None:
             return entry
     return None
 
+
 DONE_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
 INTAKE_PENDING_TTL = 24 * 60 * 60  # 24 小時（秒）
 
 
 def set_intake_pending(user_id: str):
     """預約後標記用戶需填寫諮詢資料，24 小時有效。"""
-    url = _get_kv_url()
-    if not url:
-        return
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["SET", f"intake_pending:{user_id}", "1", "EX", INTAKE_PENDING_TTL],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("SET", f"intake_pending:{user_id}", "1", "EX", INTAKE_PENDING_TTL)
 
 
 def has_intake_pending(user_id: str) -> bool:
     """檢查用戶是否在等待填寫諮詢資料。"""
-    url = _get_kv_url()
-    if not url:
-        return False
-    try:
-        response = httpx.get(
-            f"{url}/get/intake_pending:{user_id}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        return response.json().get("result") == "1"
-    except Exception:
-        return False
+    return kv_get(f"intake_pending:{user_id}") == "1"
 
 
 def clear_intake_pending(user_id: str):
     """清除諮詢資料等待狀態。"""
-    url = _get_kv_url()
-    if not url:
-        return
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["DEL", f"intake_pending:{user_id}"],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("DEL", f"intake_pending:{user_id}")
 
 
 INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
@@ -455,53 +305,25 @@ INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
 
 def save_intake_data(user_id: str, birth_date: str, question: str):
     """儲存諮詢資料（出生年月日、問題），30 天有效。"""
-    url = _get_kv_url()
-    if not url:
-        return
     data = json.dumps({"b": birth_date, "q": question}, ensure_ascii=False)
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["SET", f"intake_data:{user_id}", data, "EX", INTAKE_DATA_TTL],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("SET", f"intake_data:{user_id}", data, "EX", INTAKE_DATA_TTL)
 
 
 def get_intake_data(user_id: str) -> tuple:
     """取得諮詢資料，回傳 (birth_date, question)。找不到回傳 ("", "")。"""
-    url = _get_kv_url()
-    if not url:
-        return "", ""
-    try:
-        response = httpx.get(
-            f"{url}/get/intake_data:{user_id}",
-            headers=_get_kv_headers(),
-            timeout=3.0,
-        )
-        result = response.json().get("result")
-        if result:
-            data = json.loads(result)
+    raw = kv_get(f"intake_data:{user_id}")
+    if raw:
+        try:
+            data = json.loads(raw)
             return data.get("b", ""), data.get("q", "")
-    except Exception:
-        pass
+        except (json.JSONDecodeError, TypeError):
+            pass
     return "", ""
 
 
 def clear_intake_data(user_id: str):
     """清除諮詢資料。"""
-    url = _get_kv_url()
-    if not url:
-        return
-    try:
-        httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["DEL", f"intake_data:{user_id}"],
-            timeout=3.0,
-        )
-    except Exception:
-        pass
+    kv_cmd("DEL", f"intake_data:{user_id}")
 
 
 def save_done_booking(ref: str, booking: dict, cal_event_id: str):
@@ -516,17 +338,7 @@ def save_done_booking(ref: str, booking: dict, cal_event_id: str):
 
 def get_all_done_bookings() -> list:
     """取得所有完成的預約（30 天內）。"""
-    url = _get_kv_url()
-    if not url:
-        return []
-    try:
-        resp = httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["LRANGE", "done_queue", 0, -1], timeout=3.0,
-        )
-        refs = resp.json().get("result") or []
-    except Exception:
-        return []
+    refs = kv_cmd("LRANGE", "done_queue", 0, -1) or []
     if not refs:
         return []
 
@@ -549,42 +361,25 @@ def get_all_done_bookings() -> list:
     return results
 
 
-def update_booking_datetime(ref: str, date_str: str, time_str: str, booking: dict) -> bool:
-    """更新進行中預約的日期和時間。"""
+def _update_datetime(key_prefix: str, ref: str, date_str: str, time_str: str, booking: dict, ttl: int = None) -> bool:
+    """更新指定 key（booking: 或 done:）的日期和時間，可選擇重設 TTL。"""
     booking["d"] = date_str
     booking["t"] = time_str
-    url = _get_kv_url()
-    if not url:
-        return False
     data = json.dumps(booking, ensure_ascii=False)
-    try:
-        resp = httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["SET", f"booking:{ref}", data], timeout=3.0,
-        )
-        return resp.json().get("result") == "OK"
-    except Exception as e:
-        logger.error("update_booking_datetime error: %s", e)
-        return False
+    args = ["SET", f"{key_prefix}:{ref}", data]
+    if ttl:
+        args += ["EX", ttl]
+    return kv_cmd(*args) == "OK"
+
+
+def update_booking_datetime(ref: str, date_str: str, time_str: str, booking: dict) -> bool:
+    """更新進行中預約的日期和時間。"""
+    return _update_datetime("booking", ref, date_str, time_str, booking)
 
 
 def update_done_booking_datetime(ref: str, date_str: str, time_str: str, booking: dict) -> bool:
     """更新已完成預約的日期和時間（重設 30 天 TTL）。"""
-    booking["d"] = date_str
-    booking["t"] = time_str
-    url = _get_kv_url()
-    if not url:
-        return False
-    data = json.dumps(booking, ensure_ascii=False)
-    try:
-        resp = httpx.post(
-            url, headers=_get_kv_headers(),
-            json=["SET", f"done:{ref}", data, "EX", DONE_TTL], timeout=3.0,
-        )
-        return resp.json().get("result") == "OK"
-    except Exception as e:
-        logger.error("update_done_booking_datetime error: %s", e)
-        return False
+    return _update_datetime("done", ref, date_str, time_str, booking, ttl=DONE_TTL)
 
 
 def get_all_queue_bookings() -> list:
