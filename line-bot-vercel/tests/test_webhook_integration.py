@@ -193,3 +193,40 @@ def test_redelivered_event_is_skipped(line_env):
     event.delivery_context.is_redelivery = True
     wh.handle_text_message(event)
     assert line_env.replies == []
+
+
+def test_bot_off_notifies_customer_once(line_env):
+    wh.handle_text_message(_mk_event("/off", user_id="admin1"))
+
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("服務項目", user_id="cust1"))
+    assert line_env.replies[-1] == ["小夏老師目前在線上，請稍候老師回覆 🙏"]
+
+    # 第二次不再重複通知（靜默不回應）
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("服務項目", user_id="cust1"))
+    assert line_env.replies == []
+
+    # 管理員即使在 Bot 關閉期間仍可正常互動
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("服務項目", user_id="admin1"))
+    assert line_env.replies[-1] == [("FLEX", "百無禁忌研究所 — 服務項目")]
+
+
+def test_intake_pending_captures_full_name_and_birth(line_env):
+    wh.handle_text_message(_mk_event("預約 2026-03-02 15:00", user_id="cust1"))
+
+    line_env.pushes.clear()
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01\n3. 想問工作", user_id="cust1"))
+    assert "已收到您的諮詢資料" in line_env.replies[-1][0]
+    assert line_env.pushes[-1][0] == "admin1"
+
+
+def test_intake_pending_does_not_swallow_other_intent(line_env):
+    wh.handle_text_message(_mk_event("預約 2026-03-02 15:00", user_id="cust1"))
+
+    # 預約後客人改問服務項目，不應被誤判為諮詢資料
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("服務項目", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", "百無禁忌研究所 — 服務項目")]

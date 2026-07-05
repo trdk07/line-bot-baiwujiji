@@ -273,6 +273,21 @@ def clear_intake_pending(user_id: str):
     kv_cmd("DEL", f"intake_pending:{user_id}")
 
 
+def get_message_context(user_id: str) -> tuple:
+    """
+    合併查詢每則訊息都會用到的兩個狀態：Bot 是否運作中、該用戶是否在等待
+    填寫諮詢資料。用一次 pipeline HTTP 請求取代兩次獨立查詢，降低延遲與
+    KV 用量。回傳 (bot_active, intake_pending)。
+    """
+    results = _pipeline([
+        ["GET", KV_KEY_BOT_ACTIVE],
+        ["GET", f"intake_pending:{user_id}"],
+    ])
+    bot_active = results[0] != "off"
+    intake_pending = results[1] == "1"
+    return bot_active, intake_pending
+
+
 INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
 
 

@@ -39,7 +39,7 @@ from app.config import get_settings
 from app.services.keyword_router import match_keyword
 from app.services.notify_service import notify_admin, notify_admin_flex, get_user_name, push_text_to_user, push_flex_to_user
 from app.services.state_service import (
-    is_bot_active, set_bot_active,
+    get_message_context, set_bot_active,
     has_been_notified_bot_off, mark_notified_bot_off,
     has_seen_principles, set_seen_principles,
     save_booking, update_booking_status, delete_booking,
@@ -47,7 +47,7 @@ from app.services.state_service import (
     get_user_booking_by_status,
     save_done_booking, get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
-    set_intake_pending, has_intake_pending, clear_intake_pending,
+    set_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
 )
@@ -575,8 +575,11 @@ def handle_text_message(event: MessageEvent):
         ADMIN_COMMANDS[intent](event, user_id, user_text)
         return
 
+    # 一次 pipeline 取代兩次獨立 KV 查詢（每則訊息都會用到）
+    bot_active, intake_pending = get_message_context(user_id)
+
     # === Bot 開關檢查 ===
-    if not is_bot_active():
+    if not bot_active:
         if not is_admin(user_id):
             if not has_been_notified_bot_off(user_id):
                 mark_notified_bot_off(user_id)
@@ -586,7 +589,7 @@ def handle_text_message(event: MessageEvent):
     # === 諮詢資料填寫攔截（優先於關鍵字比對）===
     # 只有訊息不匹配任何關鍵字、或明顯是完整的姓名+生日格式時，才當成諮詢資料，
     # 避免客人預約後又輸入「我要預約」「服務項目」等其他意圖被誤吞。
-    if not is_admin(user_id) and has_intake_pending(user_id):
+    if not is_admin(user_id) and intake_pending:
         name, birth_date, question = _parse_intake_text(user_text)
         looks_like_intake = bool(name and birth_date)
         if intent is None or looks_like_intake:
