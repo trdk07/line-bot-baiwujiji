@@ -569,18 +569,22 @@ def handle_text_message(event: MessageEvent):
             return
 
     # === 諮詢資料填寫攔截（優先於關鍵字比對）===
+    # 只有訊息不匹配任何關鍵字、或明顯是完整的姓名+生日格式時，才當成諮詢資料，
+    # 避免客人預約後又輸入「我要預約」「服務項目」等其他意圖被誤吞。
     if not is_admin(user_id) and has_intake_pending(user_id):
-        clear_intake_pending(user_id)
         name, birth_date, question = _parse_intake_text(user_text)
-        display_name = get_user_name(user_id, configuration)
-        save_intake_data(user_id, birth_date, question)
-        reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
-        notify_admin_flex(
-            user_id,
-            fm.intake_card(display_name, name, birth_date, question),
-            prefix_text="提供了諮詢資料",
-        )
-        return
+        looks_like_intake = bool(name and birth_date)
+        if intent is None or looks_like_intake:
+            clear_intake_pending(user_id)
+            display_name = get_user_name(user_id, configuration)
+            save_intake_data(user_id, birth_date, question)
+            reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
+            notify_admin_flex(
+                user_id,
+                fm.intake_card(display_name, name, birth_date, question),
+                prefix_text="提供了諮詢資料",
+            )
+            return
 
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
