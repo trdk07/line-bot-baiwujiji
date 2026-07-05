@@ -260,6 +260,10 @@ def handle_follow(event: FollowEvent):
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event: MessageEvent):
     """所有文字訊息的主路由。"""
+    if event.delivery_context.is_redelivery:
+        logger.info("Skip redelivered webhook event: %s", event.webhook_event_id)
+        return
+
     user_text = event.message.text.strip()
     user_id = event.source.user_id
 
