@@ -561,3 +561,21 @@ def get_all_queue_bookings() -> list:
             except (json.JSONDecodeError, TypeError):
                 pass
     return results
+
+
+ACTIVE_STATUSES = {"pending", "awaiting_payment", "payment_reported"}
+
+
+def get_taken_slots(date_str: str) -> set:
+    """
+    取得指定日期已被進行中預約佔用的時段（軟鎖定）。
+    包含 pending / awaiting_payment / payment_reported 狀態，
+    避免管理員確認收款（建立日曆事件）前，該時段被其他客人重複預約。
+    回傳時間字串集合，例如 {"14:00", "19:00"}。
+    """
+    entries = get_all_queue_bookings()
+    return {
+        e["booking"]["t"]
+        for e in entries
+        if e["booking"].get("d") == date_str and e["booking"].get("s") in ACTIVE_STATUSES
+    }
