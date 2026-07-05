@@ -23,10 +23,7 @@ KV_KEY_BOT_ACTIVE = "bot_active"
 
 
 def _entry_user_id(ref: str) -> str:
-    """從佇列條目中提取 user_id。
-    新格式: 'user_id|booking_id' → 'user_id'
-    舊格式: 'user_id' → 'user_id'
-    """
+    """從佇列條目（'user_id|booking_id'）中提取 user_id。"""
     return ref.split("|")[0]
 
 
@@ -164,7 +161,6 @@ def set_seen_principles(user_id: str):
 # KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
 #
 # booking_queue: 預約佇列（Redis List），存放 ref（user_id|booking_id），按時間順序
-# 舊版相容：佇列中可能有不含 | 的純 user_id 條目
 
 def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
     """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。"""
@@ -202,49 +198,32 @@ def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
 
 
 def delete_booking(ref: str):
-    """刪除預約紀錄並從佇列移除。ref 為佇列條目（user_id|booking_id 或舊版 user_id）。"""
+    """刪除預約紀錄並從佇列移除。ref 為佇列條目（user_id|booking_id）。"""
     _pipeline([
         ["DEL", f"booking:{ref}"],
         ["LREM", "booking_queue", 0, ref],
-        ["DEL", "admin_context"],  # 清除舊版殘留，避免殭屍資料
     ])
 
 
-def _fetch_queue_with_bookings() -> tuple[list, list, str | None]:
+def _fetch_queue_with_bookings() -> tuple[list, list]:
     """
-    內部輔助：取得佇列 ref 列表、對應的 booking 資料，以及 legacy_uid。
-    回傳 (queue, booking_list, legacy_uid)，booking_list 與 queue 等長。
-    只發 2 次 HTTP 請求，避免重複查詢。
+    內部輔助：取得佇列 ref 列表與對應的 booking 資料。
+    回傳 (queue, booking_list)，booking_list 與 queue 等長。
     """
-    base_results = _pipeline([
-        ["LRANGE", "booking_queue", 0, -1],
-        ["GET", "admin_context"],
-    ])
-    original_queue = base_results[0] if base_results[0] else []
-    legacy_uid = base_results[1]  # 舊版 admin_context 中的 user_id
-
-    # 把舊版 admin_context 的 user_id 也加入查詢（如果不在佇列中）
-    queue = list(original_queue)
-    if legacy_uid and legacy_uid not in queue:
-        queue.append(legacy_uid)
-
+    queue = kv_cmd("LRANGE", "booking_queue", 0, -1) or []
     if not queue:
-        return [], [], legacy_uid
+        return [], []
 
-    commands = [["GET", f"booking:{ref}"] for ref in queue]
-    booking_jsons = _pipeline(commands)
-    return queue, booking_jsons, legacy_uid
+    booking_jsons = _pipeline([["GET", f"booking:{ref}"] for ref in queue])
+    return queue, booking_jsons
 
 
 def get_queue_bookings_by_status(status: str) -> list:
     """
     取得佇列中指定狀態的預約列表（用 pipeline 批次查詢）。
     回傳 [{"ref": ..., "user_id": ..., "booking": {...}}, ...]，按佇列順序。
-    不論佇列多長，只發 2 次 HTTP 請求（1 次取佇列 + 1 次批次取所有預約）。
-
-    向下相容：同時檢查舊版 admin_context，處理佇列上線前建立的預約。
     """
-    queue, booking_jsons, legacy_uid = _fetch_queue_with_bookings()
+    queue, booking_jsons = _fetch_queue_with_bookings()
     if not queue:
         return []
 
@@ -259,12 +238,6 @@ def get_queue_bookings_by_status(status: str) -> list:
                         "user_id": _entry_user_id(ref),
                         "booking": booking,
                     })
-                    # 如果是舊版的預約，補加入佇列（自動遷移）
-                    if legacy_uid and ref == legacy_uid:
-                        _pipeline([
-                            ["LREM", "booking_queue", 0, ref],
-                            ["RPUSH", "booking_queue", ref],
-                        ])
             except (json.JSONDecodeError, TypeError):
                 pass
     return results
@@ -388,7 +361,7 @@ def get_all_queue_bookings() -> list:
     用於 /list 指令顯示總覽。
     回傳 [{"ref": ..., "user_id": ..., "booking": {...}}, ...]，按佇列順序。
     """
-    queue, booking_jsons, _ = _fetch_queue_with_bookings()
+    queue, booking_jsons = _fetch_queue_with_bookings()
     if not queue:
         return []
 
