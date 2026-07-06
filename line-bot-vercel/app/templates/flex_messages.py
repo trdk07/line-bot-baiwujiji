@@ -13,6 +13,7 @@ TEXT_WHITE = "#4A453C"   # 主內文
 TEXT_GREY = "#6E675E"    # 淡色說明
 DIVIDER = "#C8B8A8"      # 分隔線
 ACCENT_RED = "#8B2020"   # 主按鈕 / 預約完成強調
+BG_HEADER = "#3D1F1F"    # 深棕 header
 
 WEEKDAY_NAMES = ["一", "二", "三", "四", "五", "六", "日"]
 
@@ -44,6 +45,32 @@ def _make_text(text: str, size: str = "sm", color: str = TEXT_WHITE, weight: str
 def _sep(margin: str = "md") -> dict:
     """建立分隔線元件。"""
     return {"type": "separator", "color": DIVIDER, "margin": margin}
+
+
+def _ornament_divider(margin: str = "lg") -> dict:
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "spacing": "sm",
+        "margin": margin,
+        "contents": [
+            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
+            _make_text("✦", size="xs", color=GOLD, align="center") | {"flex": 0, "margin": "sm", "wrap": False},
+            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
+        ],
+    }
+
+
+def _field(label: str, value: str) -> dict:
+    return {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "xs",
+        "contents": [
+            _make_text(label, size="xs", color=GOLD),
+            _make_text(value or "（未填）", size="sm", color=TEXT_WHITE),
+        ],
+    }
 
 
 def _service_card(alt_text: str, contents: list, button_label: str = "預約諮詢", button_text: str = "我要預約") -> dict:
@@ -294,55 +321,45 @@ def booking_confirmed_card(
     birth_date: str = "",
     question: str = "",
 ) -> dict:
-    consultation_section = []
-    if birth_date or question:
-        rows = []
-        if birth_date:
-            rows.append(_info_row("②", f"出生年月日：{birth_date}"))
-        if question:
-            rows.append(_info_row("③", f"想問的問題：{question}"))
-        consultation_section = [
-            {"type": "separator", "color": DIVIDER, "margin": "lg"},
-            _make_text("📋 諮詢資料", size="md", color=TEXT_TITLE, weight="bold"),
-            {
-                "type": "box",
-                "layout": "vertical",
-                "spacing": "sm",
-                "margin": "sm",
-                "contents": rows,
-            },
-        ]
+    fields = [_field("大名", customer_name)]
+    if birth_date:
+        fields.append(_field("生辰", birth_date))
+    if question:
+        fields.append(_field("所問之事", question))
 
     return {
         "type": "flex",
-        "altText": "您的預約已完成確認",
+        "altText": f"預約成立 ✦ {date_label} {time_str}",
         "contents": {
             "type": "bubble",
             "size": "mega",
-            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("✦  預 約 成 立  ✦", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xxs", color=DIVIDER, align="center"),
+                ],
+            },
             "body": {
                 "type": "box",
                 "layout": "vertical",
-                "spacing": "md",
-                "paddingAll": "20px",
+                "spacing": "lg",
+                "paddingAll": "24px",
                 "contents": [
-                    _make_text("預約已確認 ✓", size="xl", color=ACCENT_RED, weight="bold", align="center"),
-                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
-                    {
-                        "type": "box",
-                        "layout": "vertical",
-                        "spacing": "sm",
-                        "margin": "md",
-                        "contents": [
-                            _info_row("🙋🏻", customer_name),
-                            _info_row("📅", date_label),
-                            _info_row("🕐", time_str),
-                            _info_row("⏱", "60 分鐘"),
-                        ],
-                    },
-                    *consultation_section,
-                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
-                    _make_text("期待與您的相遇 🤟🏻", size="sm", color=TEXT_GREY, align="center"),
+                    _make_text(date_label, size="xxl", color=TEXT_TITLE, weight="bold", align="center"),
+                    _make_text(time_str, size="lg", color=TEXT_WHITE, align="center"),
+                    _make_text("共 60 分鐘", size="xs", color=TEXT_GREY, align="center"),
+                    _ornament_divider(),
+                    {"type": "box", "layout": "vertical", "spacing": "md", "contents": fields},
+                    _ornament_divider(),
+                    _make_text("屆時見。", size="sm", color=TEXT_TITLE, align="center"),
+                    _make_text("如需改期，直接在此告知即可", size="xxs", color=TEXT_GREY, align="center"),
                 ],
             },
         },
@@ -390,17 +407,6 @@ def booking_rescheduled_card(customer_name: str, date_label: str, time_str: str)
 
 def intake_card(display_name: str, name: str, birth_date: str, question: str) -> dict:
     """客戶諮詢資料卡片 — 解析用戶填寫的①②③欄位後發給管理員。"""
-    def _field(label: str, value: str) -> dict:
-        return {
-            "type": "box",
-            "layout": "vertical",
-            "spacing": "xs",
-            "contents": [
-                _make_text(label, size="xs", color=GOLD),
-                _make_text(value or "（未填）", size="sm", color=TEXT_WHITE),
-            ],
-        }
-
     return {
         "type": "flex",
         "altText": f"{display_name} 的諮詢資料",
@@ -408,7 +414,7 @@ def intake_card(display_name: str, name: str, birth_date: str, question: str) ->
             "type": "bubble",
             "size": "mega",
             "styles": {
-                "header": {"backgroundColor": "#3D1F1F"},
+                "header": {"backgroundColor": BG_HEADER},
                 "body": {"backgroundColor": BG_DARK},
             },
             "header": {
@@ -554,6 +560,121 @@ def time_picker_card(date_str: str, slots: list) -> dict:
                     _make_text("每個時段 60 分鐘", size="sm", color=TEXT_GREY, align="center"),
                     {"type": "separator", "color": DIVIDER, "margin": "lg"},
                     *buttons,
+                ],
+            },
+        },
+    }
+
+
+def _week_bubble(title: str, date_range: str, days: list) -> dict:
+    rows = []
+    for day in days:
+        spans = []
+        for item in day["slots"]:
+            span = {"type": "span", "text": item["time"] + "  ", "color": TEXT_WHITE}
+            if item.get("busy"):
+                span["color"] = TEXT_GREY
+                span["decoration"] = "line-through"
+            spans.append(span)
+        rows.append({
+            "type": "box",
+            "layout": "horizontal",
+            "spacing": "sm",
+            "contents": [
+                _make_text(day["label"], size="sm", color=TEXT_TITLE, weight="bold") | {"flex": 2, "wrap": False},
+                {"type": "text", "size": "sm", "wrap": True, "flex": 5, "contents": spans},
+            ],
+        })
+
+    body = rows if rows else [
+        _make_text("✦", size="md", color=GOLD, align="center"),
+        _make_text(f"{title}未開放時段", size="sm", color=TEXT_GREY, align="center"),
+    ]
+
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "styles": {
+            "header": {"backgroundColor": BG_HEADER},
+            "body": {"backgroundColor": BG_DARK},
+            "footer": {"backgroundColor": BG_DARK},
+        },
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "paddingAll": "16px",
+            "contents": [
+                _make_text(f"{title}時段", size="md", color=GOLD, weight="bold"),
+                _make_text(date_range, size="xs", color=DIVIDER),
+            ],
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "md",
+            "paddingAll": "20px",
+            "contents": [*body, _ornament_divider()],
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "paddingAll": "20px",
+            "contents": [_make_button("我要預約", "我要預約")],
+        },
+    }
+
+
+def schedule_overview_carousel(week1: dict, week2: dict) -> dict:
+    return {
+        "type": "flex",
+        "altText": "近兩週可預約時段",
+        "contents": {
+            "type": "carousel",
+            "contents": [
+                _week_bubble("本週", week1["range"], week1["days"]),
+                _week_bubble("下週", week2["range"], week2["days"]),
+            ],
+        },
+    }
+
+
+def crm_preview_card(payload: dict, customer_label: str) -> dict:
+    fields = [
+        _field("客戶狀態", customer_label),
+        _field("大名", payload.get("n", "")),
+        _field("生辰", payload.get("b", "")),
+        _field("所問之事", payload.get("q", "")),
+        _field("預約時間", f"{payload.get('d', '')} {payload.get('t', '')}"),
+    ]
+    return {
+        "type": "flex",
+        "altText": f"CRM 預覽 ✦ {payload.get('n', '')}",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("✦ CRM 資料預覽", size="lg", color=GOLD, weight="bold"),
+                    _make_text("確認後再寫入 Notion", size="xs", color=DIVIDER),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    *fields,
+                    _ornament_divider(),
+                    _make_button("寫入 CRM", "/crm ok"),
+                    _make_button("略過", "/crm skip"),
                 ],
             },
         },

@@ -16,6 +16,7 @@ LINE Webhook 路由 — 預約 + 付款確認三步機制。
 
 import re
 import logging
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request, HTTPException
 
 from linebot.v3 import WebhookHandler
@@ -50,14 +51,22 @@ from app.services.state_service import (
     set_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
+    enqueue_crm, get_crm_queue, remove_crm_queue_item,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
     get_available_slots,
+    get_busy_map,
     create_event,
     update_event,
     format_date_label,
+    TW_TZ,
 )
+from app.services.slots_service import (
+    add_open_slots, remove_open_slots, get_open_slots,
+    parse_open_lines, get_month_total, slot_datetime,
+)
+from app.services.crm_service import find_customer_by_line_id, sync_booking_to_crm
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -123,6 +132,11 @@ def is_admin(user_id: str) -> bool:
 def _parse_booking_number(text: str) -> int | None:
     """從指令文字中解析編號，例如 '/ok 2' → 2，'/ok' → None。"""
     m = re.search(r"/(?:ok|no|paid)\s+(\d+)", text)
+    return int(m.group(1)) if m else None
+
+
+def _parse_trailing_number(text: str) -> int | None:
+    m = re.search(r"\s+(\d+)\s*$", text)
     return int(m.group(1)) if m else None
 
 
@@ -198,6 +212,60 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
             name = lines[0]
 
     return name, birth, question
+
+
+def _month_add(year: int, month: int, delta: int) -> tuple[int, int]:
+    month += delta
+    year += (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    return year, month
+
+
+def _slots_table(months: list[str]) -> str:
+    from app.services.state_service import get_taken_slots
+
+    lines = []
+    for month in months:
+        data = get_open_slots(month)
+        lines.append(f"✦ {int(month[5:7])} 月時段")
+        if not data:
+            lines.append(f"{int(month[5:7])} 月：尚未開放")
+            continue
+        for date_str, times in sorted(data.items()):
+            booked = len(set(times) & get_taken_slots(date_str))
+            suffix = f"｜已約 {booked}" if booked else ""
+            lines.append(f"{format_date_label(date_str)} {' '.join(times)}{suffix}")
+    return "\n".join(lines)
+
+
+def _build_schedule_overview() -> dict:
+    today = datetime.now(TW_TZ).date()
+    monday = today - timedelta(days=today.weekday())
+    end = monday + timedelta(days=13)
+    start_str, end_str = monday.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+    busy = get_busy_map(start_str, end_str)
+    months = sorted({(monday + timedelta(days=i)).strftime("%Y-%m") for i in range(14)})
+    open_data = {}
+    for month in months:
+        open_data.update(get_open_slots(month))
+
+    def week_payload(offset: int) -> dict:
+        start = monday + timedelta(days=offset)
+        stop = start + timedelta(days=6)
+        days = []
+        for i in range(7):
+            d = start + timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+            slots = []
+            for time_str in open_data.get(date_str, []):
+                if slot_datetime(date_str, time_str) <= datetime.now(TW_TZ):
+                    continue
+                slots.append({"time": time_str, "busy": time_str in set(busy.get(date_str, []))})
+            if slots:
+                days.append({"label": format_date_label(date_str), "slots": slots})
+        return {"range": f"{start.month}/{start.day} – {stop.month}/{stop.day}", "days": days}
+
+    return fm.schedule_overview_carousel(week_payload(0), week_payload(7))
 
 
 # ============================================================
@@ -328,6 +396,20 @@ def _cmd_booking_paid(event, user_id, text):
     # 完成後存入 done 區（供改期使用）
     save_done_booking(ref, booking, cal_event_id)
     delete_booking(ref)
+
+    if settings.notion_api_key:
+        payload = {
+            "u": ctx_user,
+            "n": booking["n"],
+            "b": intake_birth,
+            "q": intake_question,
+            "d": booking["d"],
+            "t": booking["t"],
+        }
+        if enqueue_crm(payload):
+            existing = find_customer_by_line_id(ctx_user)
+            customer_label = "老客戶" if existing else "新客戶"
+            notify_admin_flex(ctx_user, fm.crm_preview_card(payload, customer_label), prefix_text="CRM 資料待確認")
 
     if cal_ok:
         cal_status = "行事曆已建立 📅"
@@ -479,6 +561,104 @@ def _cmd_booking_change(event, user_id, text):
     )
 
 
+def _cmd_open_slots(event, user_id, text):
+    entries, errors = parse_open_lines(text)
+    if entries:
+        ok = add_open_slots(entries)
+        months = sorted({d[:7] for d, _ in entries})
+        totals = "、".join(f"{int(m[5:7])} 月目前 {get_month_total(m)} 個時段" for m in months)
+        status = "已開放" if ok else "部分寫入可能失敗"
+        lines = [f"✦ {status}", *[f"{format_date_label(d)} {' '.join(times)}" for d, times in entries], totals]
+    else:
+        lines = ["沒有可開放的時段。"]
+    if errors:
+        lines.extend(["", "需修正：", *errors])
+    reply_text(event, "\n".join(lines))
+
+
+def _cmd_close_slots(event, user_id, text):
+    m = re.search(r"/close\s+(\d{1,2})/(\d{1,2})(.*)$", text)
+    if not m:
+        reply_text(event, "格式錯誤，請用：/close 7/12 15 16，或 /close 7/12")
+        return
+    month, day, rest = int(m.group(1)), int(m.group(2)), m.group(3).strip()
+    try:
+        year = datetime.now(TW_TZ).year
+        date_str = datetime(year, month, day).strftime("%Y-%m-%d")
+        if datetime.strptime(date_str, "%Y-%m-%d").date() < datetime.now(TW_TZ).date():
+            date_str = datetime(year + 1, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        reply_text(event, "日期無效，請重新輸入。")
+        return
+    times = None
+    if rest:
+        probe, errors = parse_open_lines(f"/open\n{month}/{day} {rest}")
+        if errors or not probe:
+            reply_text(event, "時段格式無效，請用 15 或 15:00。")
+            return
+        times = probe[0][1]
+    ok, blocked = remove_open_slots(date_str, times)
+    msg = f"已關閉 {format_date_label(date_str)}" if ok else "關閉時段時發生錯誤"
+    if times:
+        msg += f" {' '.join(times)}"
+    if blocked:
+        msg += "\n以下時段已有進行中預約，未關閉：\n" + " ".join(blocked)
+    reply_text(event, msg)
+
+
+def _cmd_slots(event, user_id, text):
+    today = datetime.now(TW_TZ)
+    ny, nm = _month_add(today.year, today.month, 1)
+    months = [f"{today.year:04d}-{today.month:02d}", f"{ny:04d}-{nm:02d}"]
+    reply_text(event, _slots_table(months))
+
+
+def _pick_crm_item(event, number: int | None):
+    queue = get_crm_queue()
+    if not queue:
+        reply_text(event, "目前沒有待處理的 CRM 資料。")
+        return None
+    if number is None and len(queue) == 1:
+        return queue[0]
+    if number is None:
+        lines = [f"目前有 {len(queue)} 筆待寫入 CRM：\n"]
+        for item in queue:
+            p = item["payload"]
+            lines.append(f"  {item['index']}. {p.get('n', '')}｜{p.get('d', '')} {p.get('t', '')}")
+        lines.append("\n請回覆 /crm ok 1 或 /crm skip 1")
+        reply_text(event, "\n".join(lines))
+        return None
+    for item in queue:
+        if item["index"] == number:
+            return item
+    reply_text(event, f"編號 {number} 不存在，目前只有 {len(queue)} 筆。")
+    return None
+
+
+def _cmd_crm(event, user_id, text):
+    if re.fullmatch(r"/crm\s*$", text):
+        _pick_crm_item(event, None)
+        return
+    if re.search(r"/crm\s+ok", text):
+        item = _pick_crm_item(event, _parse_trailing_number(text))
+        if not item:
+            return
+        ok, msg = sync_booking_to_crm(item["payload"])
+        if ok:
+            remove_crm_queue_item(item["raw"])
+            reply_text(event, f"已寫入 ✦ {item['payload'].get('n', '')}（{msg}）")
+        else:
+            reply_text(event, f"寫入失敗：{msg}\n資料已保留，可稍後重試。")
+        return
+    if re.search(r"/crm\s+skip", text):
+        item = _pick_crm_item(event, _parse_trailing_number(text))
+        if item:
+            remove_crm_queue_item(item["raw"])
+            reply_text(event, f"已略過 ✦ {item['payload'].get('n', '')}")
+        return
+    reply_text(event, "格式：/crm、/crm ok [編號]、/crm skip [編號]")
+
+
 ADMIN_COMMANDS = {
     "bot_off": _cmd_bot_off,
     "bot_on": _cmd_bot_on,
@@ -488,6 +668,10 @@ ADMIN_COMMANDS = {
     "booking_list": _cmd_booking_list,
     "booking_clear": _cmd_booking_clear,
     "booking_change": _cmd_booking_change,
+    "open_slots": _cmd_open_slots,
+    "close_slots": _cmd_close_slots,
+    "slots_list": _cmd_slots,
+    "crm": _cmd_crm,
 }
 
 
@@ -497,6 +681,7 @@ ADMIN_COMMANDS = {
 INTENT_HANDLERS = {
     # --- 主要動作 ---
     "services": lambda event, text: reply_flex(event, fm.service_menu()),
+    "schedule": lambda event, text: reply_flex(event, _build_schedule_overview()),
 
     # --- 價格防禦 ---
     "pricing": lambda event, text: reply_text(
@@ -537,6 +722,7 @@ def handle_follow(event: FollowEvent):
             "歡迎來到「百無禁忌」。\n\n"
             "我是工作室的助理，有任何問題都可以問我。\n\n"
             "👉 輸入「服務項目」查看我們的服務\n"
+            "👉 輸入「時段」查看近兩週可預約時間\n"
             "👉 輸入「我要預約」直接預約諮詢\n"
             "👉 輸入「找小夏老師」由老師親自回覆"
         )
@@ -683,11 +869,11 @@ def handle_text_message(event: MessageEvent):
                 reply_flex(event, fm.principles_card())
                 return
             # 已看過原則：直接進日期選擇
-            if settings.google_service_account_json and settings.google_calendar_id:
-                dates = get_next_available_dates()
+            dates = get_next_available_dates()
+            if dates:
                 reply_flex(event, fm.date_picker_card(dates))
             else:
-                reply_flex(event, fm.booking_card())
+                reply_text(event, "本月時段尚未開放，請稍候。")
             return
 
         # Step 2：客人選了日期 → 查空檔 → 顯示時段
@@ -714,6 +900,9 @@ def handle_text_message(event: MessageEvent):
                 time_str = m.group(2)
                 date_label = format_date_label(date_str)
                 user_name = get_user_name(user_id, configuration)
+                if time_str not in get_available_slots(date_str):
+                    reply_text(event, "這個時段目前無法預約，請輸入「我要預約」重新選擇。")
+                    return
 
                 # 儲存預約（狀態：pending，等管理員確認日期）
                 save_booking(user_id, date_str, time_str, user_name)

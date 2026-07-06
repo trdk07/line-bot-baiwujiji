@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # 匯款 QR Code 圖片（預約確認後發送給客人）
     payment_qr_image_url: str = ""
 
+    # 預約系統 v2
+    public_base_url: str = ""
+    cron_secret: str = ""
+    notion_api_key: str = ""
+
     model_config = {
         "env_file": ".env" if os.path.exists(".env") else None,
         "env_file_encoding": "utf-8",

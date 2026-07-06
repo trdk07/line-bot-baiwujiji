@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>預約成立卡片預覽</title>
+  <style>
+    :root {
+      --bg: #EFEBE5;
+      --header: #3D1F1F;
+      --gold: #C2A68C;
+      --title: #7B3F2A;
+      --text: #4A453C;
+      --muted: #6E675E;
+      --line: #C8B8A8;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #ded6ca;
+      font-family: -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
+      color: var(--text);
+    }
+    .bubble {
+      width: min(360px, calc(100vw - 32px));
+      overflow: hidden;
+      border-radius: 18px;
+      box-shadow: 0 18px 48px rgb(61 31 31 / 18%);
+      background: var(--bg);
+    }
+    header {
+      background: var(--header);
+      text-align: center;
+      padding: 18px 16px 16px;
+    }
+    h1 {
+      margin: 0;
+      color: var(--gold);
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    header p {
+      margin: 6px 0 0;
+      color: var(--line);
+      font-size: 11px;
+    }
+    main {
+      padding: 28px 24px;
+      display: grid;
+      gap: 18px;
+    }
+    .date {
+      color: var(--title);
+      font-size: 28px;
+      font-weight: 700;
+      text-align: center;
+    }
+    .time, .duration, .closing {
+      text-align: center;
+    }
+    .time { font-size: 18px; }
+    .duration, .hint { color: var(--muted); font-size: 12px; }
+    .divider {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      color: var(--gold);
+    }
+    .divider::before, .divider::after {
+      content: "";
+      height: 1px;
+      background: var(--line);
+    }
+    .fields {
+      display: grid;
+      gap: 14px;
+    }
+    .label {
+      color: var(--gold);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .value {
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .closing {
+      color: var(--title);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <article class="bubble">
+    <header>
+      <h1>✦ 預 約 成 立 ✦</h1>
+      <p>百無禁忌研究所</p>
+    </header>
+    <main>
+      <section>
+        <div class="date">7/12（日）</div>
+        <div class="time">15:00 – 16:00</div>
+        <div class="duration">共 60 分鐘</div>
+      </section>
+      <div class="divider">✦</div>
+      <section class="fields">
+        <div>
+          <div class="label">大名</div>
+          <div class="value">王小明</div>
+        </div>
+        <div>
+          <div class="label">生辰</div>
+          <div class="value">1990/05/15 辰時</div>
+        </div>
+        <div>
+          <div class="label">所問之事</div>
+          <div class="value">最近工作方向有點卡，想知道下一步適合怎麼安排。</div>
+        </div>
+      </section>
+      <div class="divider">✦</div>
+      <section>
+        <div class="closing">屆時見。</div>
+        <div class="hint">如需改期，直接在此告知即可</div>
+      </section>
+    </main>
+  </article>
+</body>
+</html>

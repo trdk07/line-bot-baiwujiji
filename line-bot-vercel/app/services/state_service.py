@@ -411,3 +411,27 @@ def get_taken_slots(date_str: str) -> set:
         for e in entries
         if e["booking"].get("d") == date_str and e["booking"].get("s") in ACTIVE_STATUSES
     }
+
+
+CRM_QUEUE_TTL = 7 * 24 * 60 * 60
+
+
+def enqueue_crm(payload: dict) -> bool:
+    data = json.dumps(payload, ensure_ascii=False)
+    results = _pipeline([["RPUSH", "crm_queue", data], ["EXPIRE", "crm_queue", CRM_QUEUE_TTL]])
+    return results[0] is not None
+
+
+def get_crm_queue() -> list:
+    raws = kv_cmd("LRANGE", "crm_queue", 0, -1) or []
+    items = []
+    for i, raw in enumerate(raws, 1):
+        try:
+            items.append({"index": i, "raw": raw, "payload": json.loads(raw)})
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return items
+
+
+def remove_crm_queue_item(raw: str) -> bool:
+    return kv_cmd("LREM", "crm_queue", 1, raw) is not None

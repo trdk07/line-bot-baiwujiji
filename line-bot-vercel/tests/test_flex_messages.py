@@ -80,3 +80,28 @@ def test_all_service_cards_end_with_single_button():
         card = getattr(fm, name)()
         last = card["contents"]["body"]["contents"][-1]
         assert last["type"] == "button", f"{name} should end with a button"
+
+
+def test_booking_confirmed_card_invitation_style_and_optional_fields():
+    card = fm.booking_confirmed_card("王小明", "7/12（日）", "15:00 – 16:00", question="工作方向")
+    assert card["altText"] == "預約成立 ✦ 7/12（日） 15:00 – 16:00"
+    assert card["contents"]["styles"]["header"]["backgroundColor"] == fm.BG_HEADER
+    body_text = str(card["contents"])
+    assert "✦  預 約 成 立  ✦" in body_text
+    assert "所問之事" in body_text
+    assert "生辰" not in body_text
+
+
+def test_schedule_overview_carousel_has_two_bubbles():
+    week = {"range": "7/6 – 7/12", "days": [{"label": "7/12（日）", "slots": [{"time": "15:00", "busy": False}, {"time": "16:00", "busy": True}]}]}
+    card = fm.schedule_overview_carousel(week, {"range": "7/13 – 7/19", "days": []})
+    assert card["altText"] == "近兩週可預約時段"
+    assert card["contents"]["type"] == "carousel"
+    assert len(card["contents"]["contents"]) == 2
+    assert "line-through" in str(card)
+
+
+def test_crm_preview_card_buttons():
+    card = fm.crm_preview_card({"n": "王小明", "b": "", "q": "問題", "d": "2026-07-12", "t": "15:00"}, "新客戶")
+    assert "/crm ok" in _button_texts(card)
+    assert "/crm skip" in _button_texts(card)

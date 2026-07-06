@@ -7,11 +7,23 @@ Upstash KV（httpx.post），驗證完整的管理員指令與預約流程行為
 
 from types import SimpleNamespace
 from unittest.mock import patch
+import json
 
 import pytest
 import linebot.v3.messaging as messaging
 
 import app.routers.webhook as wh
+
+OPEN_JULY = {
+    "2026-07-12": ["15:00", "16:00"],
+    "2026-07-13": ["15:00"],
+    "2026-07-14": ["15:00"],
+    "2026-07-15": ["15:00"],
+}
+
+
+def _seed_open_slots(env):
+    env.kv.store["open:2026-07"] = json.dumps(OPEN_JULY, ensure_ascii=False)
 
 
 class FakeKV:
@@ -131,16 +143,17 @@ def test_ok_with_no_pending_bookings(line_env):
 
 
 def test_full_booking_lifecycle(line_env):
+    _seed_open_slots(line_env)
     # 第一次「我要預約」→ 原則說明卡片
     wh.handle_text_message(_mk_event("我要預約", user_id="cust1"))
     assert line_env.replies[-1] == [("FLEX", "預約諮詢前，請先了解百無禁忌的原則")]
 
-    # 第二次 → 沒有 Google Calendar 設定，走 booking_card fallback
+    # 第二次 → 顯示手動開放日期
     wh.handle_text_message(_mk_event("我要預約", user_id="cust1"))
-    assert line_env.replies[-1] == [("FLEX", "預約諮詢")]
+    assert line_env.replies[-1] == [("FLEX", "選擇預約日期")]
 
     # 選擇日期+時段 → 建立 pending 預約，通知管理員
-    wh.handle_text_message(_mk_event("預約 2026-03-02 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("預約 2026-07-12 15:00", user_id="cust1"))
     assert "預約申請已送出" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "admin1"
     assert "📅 預約申請" in line_env.pushes[-1][1][0]
@@ -162,12 +175,13 @@ def test_full_booking_lifecycle(line_env):
     assert line_env.replies[-1] == ["📋 目前沒有任何進行中的預約。"]
 
     # /change 對已完成的預約改期
-    wh.handle_text_message(_mk_event("/change 2026-03-03 16:00", user_id="admin1"))
+    wh.handle_text_message(_mk_event("/change 2026-07-12 16:00", user_id="admin1"))
     assert "已改期" in line_env.replies[-1][0]
 
 
 def test_no_rejects_booking_and_notifies_customer(line_env):
-    wh.handle_text_message(_mk_event("預約 2026-03-05 15:00", user_id="cust3"))
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-13 15:00", user_id="cust3"))
     wh.handle_text_message(_mk_event("/no", user_id="admin1"))
     assert "已婉拒" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "cust3"
@@ -175,7 +189,8 @@ def test_no_rejects_booking_and_notifies_customer(line_env):
 
 
 def test_clear_requires_confirmation(line_env):
-    wh.handle_text_message(_mk_event("預約 2026-03-04 15:00", user_id="cust2"))
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-14 15:00", user_id="cust2"))
 
     wh.handle_text_message(_mk_event("/clear", user_id="admin1"))
     assert "即將清除全部 1 筆預約" in line_env.replies[-1][0]
@@ -214,7 +229,8 @@ def test_bot_off_notifies_customer_once(line_env):
 
 
 def test_intake_pending_captures_full_name_and_birth(line_env):
-    wh.handle_text_message(_mk_event("預約 2026-03-02 15:00", user_id="cust1"))
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
 
     line_env.pushes.clear()
     line_env.replies.clear()
@@ -224,7 +240,8 @@ def test_intake_pending_captures_full_name_and_birth(line_env):
 
 
 def test_intake_pending_does_not_swallow_other_intent(line_env):
-    wh.handle_text_message(_mk_event("預約 2026-03-02 15:00", user_id="cust1"))
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
 
     # 預約後客人改問服務項目，不應被誤判為諮詢資料
     line_env.replies.clear()

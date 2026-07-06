@@ -20,6 +20,10 @@ KEYWORD_PATTERNS = [
     (r"^/list$", "booking_list"),
     (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
+    (r"^/open\b", "open_slots"),
+    (r"^/close\b", "close_slots"),
+    (r"^/slots$", "slots_list"),
+    (r"^/crm\b", "crm"),
     (r"^/myid$", "get_my_id"),
 
     # --- 諮詢資料後備（①②③ 格式，intake_pending 消耗後仍可補填）---
@@ -36,6 +40,7 @@ KEYWORD_PATTERNS = [
     # --- 預約流程（放在 booking 前面，優先比對日期格式）---
     (r"^預約\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", "booking_confirm"),
     (r"^預約\s+\d{4}-\d{2}-\d{2}$", "booking_date"),
+    (r"本週|下週|時段|什麼時候可以", "schedule"),
 
     # --- 服務分類（放在「服務項目」之前，避免「招財項目」「感情項目」被「項目」搶先匹配）---
     (r"什麼是諮詢|為什麼要諮詢|諮詢是什麼|為何諮詢|為什麼要先諮詢", "what_is_consultation"),
