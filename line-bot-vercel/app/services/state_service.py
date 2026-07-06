@@ -433,5 +433,30 @@ def get_crm_queue() -> list:
     return items
 
 
+
+def update_crm_booking_datetime(user_id: str, date_str: str, time_str: str) -> int:
+    """更新 CRM 待確認佇列中同一 LINE 用戶的預約日期時間，回傳更新筆數。"""
+    raws = kv_cmd("LRANGE", "crm_queue", 0, -1) or []
+    if not raws:
+        return 0
+    updated = 0
+    commands = []
+    for raw in raws:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if payload.get("u") != user_id:
+            continue
+        payload["d"] = date_str
+        payload["t"] = time_str
+        commands.append(["LREM", "crm_queue", 1, raw])
+        commands.append(["RPUSH", "crm_queue", json.dumps(payload, ensure_ascii=False)])
+        updated += 1
+    if commands:
+        commands.append(["EXPIRE", "crm_queue", CRM_QUEUE_TTL])
+        _pipeline(commands)
+    return updated
+
 def remove_crm_queue_item(raw: str) -> bool:
     return kv_cmd("LREM", "crm_queue", 1, raw) is not None

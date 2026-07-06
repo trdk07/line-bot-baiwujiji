@@ -50,7 +50,7 @@ from app.services.state_service import (
     set_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
-    enqueue_crm, get_crm_queue, remove_crm_queue_item,
+    enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -181,13 +181,20 @@ def _pick_booking(status: str, number: int | None, event, no_entry_msg: str | No
         return None, None, None
 
 
+def _strip_intake_label(value: str, labels: tuple[str, ...]) -> str:
+    """移除使用者填寫諮詢資料時常見的欄位名稱前綴。"""
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    return re.sub(rf"^\s*(?:{label_pattern})\s*[:：,，、-]?\s*", "", value).strip()
+
+
 def _parse_intake_text(text: str) -> tuple[str, str, str]:
     """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
-    優先比對 1. / 1- / 1、格式，找不到就按行分割。
+    優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按行分割。
     """
-    name_m = re.search(r"1[.\-、．]\s*(.+?)(?=2[.\-、．]|\Z)", text, re.DOTALL)
-    birth_m = re.search(r"2[.\-、．]\s*(.+?)(?=3[.\-、．]|\Z)", text, re.DOTALL)
-    quest_m = re.search(r"3[.\-、．]\s*(.+)", text, re.DOTALL)
+    marker = r"(?:^|\n)\s*{}(?:[.\-、．]|\s+)\s*"
+    name_m = re.search(marker.format(1) + r"(.+?)(?=" + marker.format(2) + r"|\Z)", text, re.DOTALL)
+    birth_m = re.search(marker.format(2) + r"(.+?)(?=" + marker.format(3) + r"|\Z)", text, re.DOTALL)
+    quest_m = re.search(marker.format(3) + r"(.+)", text, re.DOTALL)
 
     name = name_m.group(1).strip() if name_m else ""
     birth = birth_m.group(1).strip() if birth_m else ""
@@ -203,6 +210,10 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
             name, birth = lines[0], lines[1]
         elif len(lines) == 1:
             name = lines[0]
+
+    name = _strip_intake_label(name, ("姓名", "名字", "大名", "本名", "姓名名字"))
+    birth = _strip_intake_label(birth, ("出生年月日時", "出生年月日", "出生時間", "生日", "生辰", "生辰八字"))
+    question = _strip_intake_label(question, ("想問的問題", "想了解的問題", "問題", "提問", "詢問"))
 
     return name, birth, question
 
@@ -519,6 +530,9 @@ def _cmd_booking_change(event, user_id, text):
         cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
         cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
 
+    crm_updated = update_crm_booking_datetime(ctx_user, new_date, new_time)
+    crm_status = "" if not crm_updated else f"\nCRM 待確認資料已更新 {crm_updated} 筆"
+
     push_ok = push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
     push_status = "" if push_ok else "\n⚠️ 推送改期通知給客人失敗，請手動聯繫客人。"
 
@@ -528,6 +542,7 @@ def _cmd_booking_change(event, user_id, text):
         f"原：{old_date_label} {old_time}\n"
         f"新：{new_date_label} {new_time}"
         f"{cal_status}"
+        f"{crm_status}"
         f"{push_status}",
     )
 
@@ -668,7 +683,14 @@ def handle_text_message(event: MessageEvent):
     intent = match_keyword(user_text)
 
     if intent == "get_my_id":
-        reply_text(event, f"你的 LINE User ID：\n{user_id}")
+        admin_status = "✅ 這支帳號目前是管理員" if is_admin(user_id) else "⚠️ 這支帳號不是目前設定的管理員"
+        configured = "已設定" if settings.admin_line_user_id else "尚未設定"
+        reply_text(
+            event,
+            f"你的 LINE User ID：\n{user_id}\n\n"
+            f"{admin_status}\n"
+            f"ADMIN_LINE_USER_ID：{configured}",
+        )
         return
 
     if intent in ADMIN_COMMANDS:
