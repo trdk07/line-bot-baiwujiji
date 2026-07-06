@@ -186,9 +186,10 @@
     .booking-row { border-top: 1px solid var(--line); padding: 12px 0; }
     .booking-row:first-of-type { border-top: 0; }
     .booking-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .booking-form { display: grid; grid-template-columns: 1fr 92px 72px; gap: 8px; margin-top: 8px; }
+    .booking-form { display: grid; grid-template-columns: 1fr 92px 72px 72px; gap: 8px; margin-top: 8px; }
     .booking-form input, .booking-form button { border: 1px solid var(--line); border-radius: 8px; padding: 9px 8px; font: inherit; }
     .booking-form button { border: 0; background: var(--accent); color: #fff; font-weight: 700; }
+    .booking-form .delete { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
     .toast.show { opacity: 1; }
   </style>
 </head>
@@ -287,12 +288,28 @@
           <div class="booking-form">
             <input type="date" value="${escapeHtml(b.date)}" data-ref="${escapeHtml(b.ref)}" data-field="date">
             <input type="time" value="${escapeHtml(b.time)}" data-ref="${escapeHtml(b.ref)}" data-field="time">
-            <button type="button" data-ref="${escapeHtml(b.ref)}" data-status="${escapeHtml(b.status)}">改期</button>
+            <button type="button" data-action="change" data-ref="${escapeHtml(b.ref)}" data-status="${escapeHtml(b.status)}">改期</button>
+            <button type="button" class="delete" data-action="delete" data-ref="${escapeHtml(b.ref)}" data-status="${escapeHtml(b.status)}" data-label="${escapeHtml((b.name || '未命名') + ' ' + b.date + ' ' + b.time)}">刪除</button>
           </div>
         </div>`).join("");
-      list.querySelectorAll("button[data-ref]").forEach((btn) => {
+      list.querySelectorAll("button[data-action='change']").forEach((btn) => {
         btn.onclick = () => changeBooking(btn.dataset.ref, btn.dataset.status);
       });
+      list.querySelectorAll("button[data-action='delete']").forEach((btn) => {
+        btn.onclick = () => deleteBooking(btn.dataset.ref, btn.dataset.status, btn.dataset.label);
+      });
+    }
+
+    async function deleteBooking(ref, status, labelText) {
+      if (!confirm(`確定刪除這筆預約？\n${labelText}\n\n會通知顧客，已成立預約也會嘗試刪除 Google Calendar。`)) return;
+      const res = await fetch("/api/bookings/delete", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({ref, status, token: adminToken, notify: true})
+      });
+      if (!res.ok) return toast("刪除失敗");
+      toast("已刪除並通知顧客 ✦");
+      await load();
     }
 
     function escapeHtml(value) {

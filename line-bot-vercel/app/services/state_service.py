@@ -324,6 +324,14 @@ def save_done_booking(ref: str, booking: dict, cal_event_id: str):
     ])
 
 
+def delete_done_booking(ref: str):
+    """刪除已完成預約紀錄並從 done 佇列移除。"""
+    _pipeline([
+        ["DEL", f"done:{ref}"],
+        ["LREM", "done_queue", 0, ref],
+    ])
+
+
 def get_all_done_bookings() -> list:
     """取得所有完成的預約（30 天內）。"""
     refs = kv_cmd("LRANGE", "done_queue", 0, -1) or []
@@ -457,6 +465,23 @@ def update_crm_booking_datetime(user_id: str, date_str: str, time_str: str) -> i
         commands.append(["EXPIRE", "crm_queue", CRM_QUEUE_TTL])
         _pipeline(commands)
     return updated
+
+def remove_crm_booking(user_id: str, date_str: str, time_str: str) -> int:
+    """移除同一 LINE 用戶、同一日期時間的 CRM 待確認資料，回傳移除筆數。"""
+    raws = kv_cmd("LRANGE", "crm_queue", 0, -1) or []
+    commands, removed = [], 0
+    for raw in raws:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if payload.get("u") == user_id and payload.get("d") == date_str and payload.get("t") == time_str:
+            commands.append(["LREM", "crm_queue", 1, raw])
+            removed += 1
+    if commands:
+        _pipeline(commands)
+    return removed
+
 
 def remove_crm_queue_item(raw: str) -> bool:
     return kv_cmd("LREM", "crm_queue", 1, raw) is not None
