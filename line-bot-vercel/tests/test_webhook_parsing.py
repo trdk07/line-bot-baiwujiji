@@ -27,12 +27,26 @@ class TestParseIntakeText:
         assert birth == "1990-01-01"
         assert question == "想問感情"
 
+    def test_numbered_space_format(self):
+        text = "1 王小明\n2 1990-01-01 08:00\n3 想問工作與感情"
+        name, birth, question = _parse_intake_text(text)
+        assert name == "王小明"
+        assert birth == "1990-01-01 08:00"
+        assert question == "想問工作與感情"
+
     def test_plain_three_lines_fallback(self):
         text = "王小明\n1990-01-01\n想問感情運勢\n還有其他問題"
         name, birth, question = _parse_intake_text(text)
         assert name == "王小明"
         assert birth == "1990-01-01"
         assert question == "想問感情運勢\n還有其他問題"
+
+    def test_plain_three_lines_with_labels_fallback(self):
+        text = "姓名：王小明\n出生年月日時：1990-01-01 08:00\n問題：想問工作與感情"
+        name, birth, question = _parse_intake_text(text)
+        assert name == "王小明"
+        assert birth == "1990-01-01 08:00"
+        assert question == "想問工作與感情"
 
     def test_plain_two_lines_fallback(self):
         text = "王小明\n1990-01-01"

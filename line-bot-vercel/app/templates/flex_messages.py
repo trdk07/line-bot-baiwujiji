@@ -48,15 +48,17 @@ def _sep(margin: str = "md") -> dict:
 
 
 def _ornament_divider(margin: str = "lg") -> dict:
+    """建立左右對稱的置中裝飾分隔線，避免裝飾符號視覺上偏左或偏右。"""
     return {
         "type": "box",
         "layout": "horizontal",
         "spacing": "sm",
         "margin": margin,
+        "alignItems": "center",
         "contents": [
-            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
-            _make_text("✦", size="xs", color=GOLD, align="center") | {"flex": 0, "margin": "sm", "wrap": False},
-            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
+            {"type": "separator", "color": DIVIDER, "flex": 1},
+            {"type": "text", "text": "✦", "size": "xs", "color": GOLD, "align": "center", "flex": 0, "wrap": False},
+            {"type": "separator", "color": DIVIDER, "flex": 1},
         ],
     }
 
@@ -672,10 +674,11 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
             {
                 "type": "image",
                 "url": qr_image_url,
-                "size": "full",
+                "size": "xl",
                 "aspectMode": "fit",
                 "aspectRatio": "1:1",
                 "margin": "md",
+                "align": "center",
             },
             _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
         ]
