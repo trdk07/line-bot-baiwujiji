@@ -188,6 +188,24 @@ def test_booking_entry_uses_web_calendar_when_base_url_is_set(line_env, monkeypa
     assert line_env.replies[-1] == [("FLEX", "選擇預約時段")]
 
 
+def test_admin_can_request_booking_editor_link(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret-token")
+
+    wh.handle_text_message(_mk_event("設定時段", user_id="admin1"))
+
+    assert line_env.replies[-1] == [("FLEX", "設定可預約時段")]
+
+
+def test_admin_booking_editor_link_requires_env(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "")
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret-token")
+
+    wh.handle_text_message(_mk_event("/booking-admin", user_id="admin1"))
+
+    assert "尚未設定 PUBLIC_BASE_URL 或 ADMIN_PAGE_TOKEN" in line_env.replies[-1][0]
+
+
 def test_no_rejects_booking_and_notifies_customer(line_env):
     _seed_open_slots(line_env)
     wh.handle_text_message(_mk_event("預約 2026-07-13 15:00", user_id="cust3"))
