@@ -21,6 +21,7 @@ KEYWORD_PATTERNS = [
     (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
     (r"^/crm\b", "crm"),
+    (r"^/booking-admin$|^設定時段$", "booking_admin"),
     (r"^/myid$", "get_my_id"),
 
     # --- 諮詢資料後備（①②③ 格式，intake_pending 消耗後仍可補填）---

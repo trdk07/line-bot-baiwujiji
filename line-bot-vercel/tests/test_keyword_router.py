@@ -26,6 +26,8 @@ POSITIVE_CASES = [
     ("/change 1 2026-03-01 14:00", "booking_change"),
     ("/crm", "crm"),
     ("/crm ok 1", "crm"),
+    ("/booking-admin", "booking_admin"),
+    ("設定時段", "booking_admin"),
     ("/myid", "get_my_id"),
 
     # --- 諮詢資料後備格式 ---

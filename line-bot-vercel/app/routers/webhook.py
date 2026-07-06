@@ -212,6 +212,13 @@ def _booking_url() -> str:
     return f"{base}/booking.html" if base else ""
 
 
+def _admin_booking_url() -> str:
+    url = _booking_url()
+    if not (url and settings.admin_page_token):
+        return ""
+    return f"{url}?token={settings.admin_page_token}"
+
+
 def _reply_booking_entry_or_fallback(event):
     url = _booking_url()
     if url:
@@ -235,6 +242,14 @@ def _cmd_bot_off(event, user_id, text):
 def _cmd_bot_on(event, user_id, text):
     set_bot_active(True)
     reply_text(event, "🟢 Bot 已開啟，助理恢復上班。")
+
+
+def _cmd_booking_admin(event, user_id, text):
+    url = _admin_booking_url()
+    if not url:
+        reply_text(event, "尚未設定 PUBLIC_BASE_URL 或 ADMIN_PAGE_TOKEN，暫時無法產生編輯連結。")
+        return
+    reply_flex(event, fm.admin_booking_link_card(url, "設定可預約時段"))
 
 
 def _cmd_booking_ok(event, user_id, text):
@@ -573,6 +588,7 @@ ADMIN_COMMANDS = {
     "booking_clear": _cmd_booking_clear,
     "booking_change": _cmd_booking_change,
     "crm": _cmd_crm,
+    "booking_admin": _cmd_booking_admin,
 }
 
 
