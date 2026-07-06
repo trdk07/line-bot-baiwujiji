@@ -24,9 +24,6 @@ POSITIVE_CASES = [
     ("/clear yes", "booking_clear"),
     ("/change 2026-03-01 14:00", "booking_change"),
     ("/change 1 2026-03-01 14:00", "booking_change"),
-    ("/open\n7/12 15", "open_slots"),
-    ("/close 7/12 15", "close_slots"),
-    ("/slots", "slots_list"),
     ("/crm", "crm"),
     ("/crm ok 1", "crm"),
     ("/myid", "get_my_id"),
@@ -95,6 +92,9 @@ NEGATIVE_CASES = [
     "謝謝",
     "",
     "今天天氣真好",
+    "/open\n7/12 15",
+    "/close 7/12 15",
+    "/slots",
 ]
 
 

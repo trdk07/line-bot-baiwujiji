@@ -31,6 +31,8 @@ class Settings(BaseSettings):
 
     # 預約系統 v2
     public_base_url: str = ""
+    bot_basic_id: str = ""
+    admin_page_token: str = ""
     cron_secret: str = ""
     notion_api_key: str = ""
 

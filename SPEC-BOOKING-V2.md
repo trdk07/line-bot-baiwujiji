@@ -15,14 +15,14 @@
 ```
 F1 預約確認卡片改版（請帖風）              — 獨立，先做
 F2 手動開放時段（資料模型）                — 核心資料層
-F3 時段總覽卡片＋ /open 指令開放時段（純 Flex）— 依賴 F2
+F3 一般網頁月曆（客人選時段＋老師開時段）— 依賴 F2
 F4 定期通知（Vercel Cron）                — 依賴 F2（讀開放時段）
 F5 半自動 CRM 同步（Notion）              — 獨立，掛在 /paid 之後
 ```
 
-> **2026-07-06 變更**：原 F3 為 LIFF 月曆頁，因 LINE 平台改版無法新建 LIFF app，
-> 改為**全程聊天室內完成**：客人看 Flex 總覽卡片，老師用 `/open` 批次指令開放時段。
-> 不需要任何網頁、LINE Login、外部授權。
+> **2026-07-06 變更**：F3 改為**一般網頁月曆，無 LIFF SDK**。
+> 客人從 LINE 小卡開 `{PUBLIC_BASE_URL}/booking.html`，選時段後跳轉 LINE deep link，
+> 讓聊天室預填「預約 YYYY-MM-DD HH:MM」；老師用帶 token 的簽名連結編輯時段。
 
 建議實作順序：F1 → F2 → F3 → F4 → F5。每個 F 一個獨立 commit/PR，各自有驗收條件。
 
@@ -30,13 +30,14 @@ F5 半自動 CRM 同步（Notion）              — 獨立，掛在 /paid 之�
 
 | 檔案 | 動作 | 說明 |
 |---|---|---|
-| `app/templates/flex_messages.py` | 修改 | F1 重寫 `booking_confirmed_card`；F3 新增 `schedule_overview_carousel`；F5 新增 `crm_preview_card` |
-| `app/services/slots_service.py` | **新增** | F2 開放時段資料層＋ F3 `/open` 文字解析 |
+| `app/templates/flex_messages.py` | 修改 | F1 重寫 `booking_confirmed_card`；F3 新增月曆入口卡；F5 新增 `crm_preview_card` |
+| `app/services/slots_service.py` | **新增** | F2 開放時段資料層＋ F3 整月覆寫 |
 | `app/services/calendar_service.py` | 修改 | F2 改讀開放時段，移除 `WEEKLY_SLOTS`；F3 新增整段 busy 查詢 |
 | `app/services/crm_service.py` | **新增** | F5 Notion 讀寫 |
-| `app/routers/api.py` | **新增** | F4 cron 端點（僅此一個端點） |
-| `app/routers/webhook.py` | 修改 | F3 `/open /close /slots` 指令＋總覽關鍵字、F5 `/crm` 指令 |
+| `app/routers/api.py` | **新增** | F3 `booking.html` + slots API；F4 cron 端點 |
+| `app/routers/webhook.py` | 修改 | F3 月曆入口卡、F5 `/crm` 指令 |
 | `app/config.py` | 修改 | 新增環境變數 |
+| `app/templates/booking.html` | **新增** | F3 單檔一般網頁月曆（無 LIFF） |
 | `public/icons/*.png` | **新增** | F1 圖示（SVG 源檔放 `docs/icons-src/`；Vercel 靜態檔優先於 rewrite，可直接伺服） |
 | `vercel.json` | 修改 | F4 crons 設定 |
 | `tests/` | 修改+新增 | 各功能對應測試 |
@@ -122,18 +123,16 @@ F5 半自動 CRM 同步（Notion）              — 獨立，掛在 /paid 之�
 | `open:{YYYY-MM}` | JSON：`{"2026-07-12": ["15:00","16:00","20:00"], ...}` 只存有開放時段的日期 | 100 天 |
 
 - 時段字串一律 `HH:MM`、長度固定 60 分鐘（保留 `SLOT_DURATION`）。跨午夜場次以 `00:00` 記在**隔天**所屬的日期鍵下？——**否**：記在被點選的那一天（與現行「週日 20:00–01:00 的 00:00 場」慣例一致：00:00 記在週日的日期鍵，實際事件落在隔天凌晨，`create_event` 既有邏輯已處理跨午夜，但 `_generate_slot_times` 移除後需把「00:00 視為隔日凌晨」的換算搬進 slots_service 的一個小工具函式）。
-- 允許開放的時間格點（`/open` 指令接受的合法值）：常數 `SELECTABLE_TIMES = ["13:00","14:00",...,"23:00","00:00"]`，集中在 `slots_service.py` 頂部，要改範圍只動這一行。
+- 允許開放的時間格點（網頁編輯模式顯示的合法值）：常數 `SELECTABLE_TIMES = ["13:00","14:00",...,"23:00","00:00"]`，集中在 `slots_service.py` 頂部，要改範圍只動這一行。
 
 ### 2.2 新模組 `app/services/slots_service.py`
 
 ```python
 get_open_slots(month: str) -> dict             # 讀 open:{month}，無資料回 {}
-add_open_slots(entries: list) -> bool          # 合併寫入 [(date, [times])]，/open 指令用；自動分月寫入
-remove_open_slots(date: str, times: list|None) -> tuple[bool, list]
-                                               # /close 用；times=None 整天。回傳 (成功, 因有預約而擋下的清單)
+set_open_slots(month: str, data: dict) -> tuple[bool, list]
+                                               # 整月覆寫；若要移除已被進行中預約佔用的時段，回 (False, conflicts)
 get_open_dates(days: int = 30) -> list         # 未來 N 天內有開放時段的日期（date picker 資料源）
 slot_datetime(date_str, time_str) -> datetime  # 含跨午夜換算（00:00 → 隔日）
-parse_open_lines(text) -> tuple[list, list]    # 純函式：解析 /open 多行文字 → (entries, 錯誤訊息列表)
 ```
 
 ### 2.3 `calendar_service.py` 修改
@@ -154,91 +153,75 @@ parse_open_lines(text) -> tuple[list, list]    # 純函式：解析 /open 多行
 
 ---
 
-## 3. F3 — 時段總覽卡片＋ `/open` 指令開放時段（純 Flex，無網頁）
+## 3. F3 — 一般網頁月曆（無 LIFF SDK）
 
-> LIFF 因 LINE 平台改版無法新建，本功能**全部在聊天室內完成**：
-> 老師用指令開放時段、客人看 Flex 總覽卡片。不需要 LINE Login、不需要任何網頁與外部授權。
+> 使用 commit `0bfc091` 的 §3 LIFF 月曆視覺設計作為 HTML/CSS 底稿，
+> **完全沿用 §3.1b 配色 token 與月曆版式**；只把 LIFF 換成一般網頁、LINE deep link 與簽名 token。
 
-### 3.1 老師端：`/open` / `/close` / `/slots` 指令
+### 3.1 技術形態
 
-**`/open` 多行批次格式——一則訊息設定一整個月**：
+- 新增 `app/templates/booking.html`：vanilla JS + inline CSS，無框架、無 build step、無 LIFF SDK。
+- `GET /booking.html` 由後端回傳 HTML，並注入 `BOT_BASIC_ID`。
+- 頁面純靠 `fetch('/api/slots?month=YYYY-MM')` 取得公開資料；`?mock=1` 可在一般瀏覽器用假資料預覽視覺與互動。
+- 客人送出時段不呼叫 `liff.sendMessages` / `liff.closeWindow`，改跳 LINE deep link：
+  ```js
+  const msg = `預約 ${dateStr} ${timeStr}`;
+  location.href = `https://line.me/R/oaMessage/${BOT_BASIC_ID}/?${encodeURIComponent(msg)}`;
+  ```
+- `BOT_BASIC_ID` 缺少時，送出按鈕退化成提示「請回聊天室輸入：預約 YYYY-MM-DD HH:MM」。
 
-```
-/open
-7/12 15 16 20
-7/14 15 16
-7/19 20 21 22 00
-```
+### 3.1b 視覺設計規格（強制，與 Flex 卡片同一套設計語言）
 
-- 每行 `M/D` ＋空格分隔的小時（`15`＝15:00；也接受 `15:00`；`00`＝跨午夜隔日凌晨場，記在該行日期鍵下）。
-- 年份自動推定：該日期若已過，視為明年（正常使用都是設定當月/下月）。
-- **合併語義**：`/open` 把時段「加入」該日既有集合，不覆蓋整月——可以分多次補開。
-- 只接受 `SELECTABLE_TIMES` 內的值；解析採**逐行容錯**：合法的行照常生效，錯誤的行逐行回報（「第 3 行看不懂：`7/x 25`」），不整包退回。
-- 回覆成功摘要：本次開放的日期時段清單＋該月目前開放總數。
-- 解析邏輯 `parse_open_lines()` 是純函式（見 §2.2），必須有完整單元測試（合法/非法混行、HH:MM 與 H 混用、跨年、非法時間值）。
+CSS variables 一比一沿用 bot 配色 tokens，**禁止出現此表以外的色值**
+（透明度變化除外，如 rgba 陰影）：
 
-**`/close 7/12 15 16`**：關閉該日指定時段；**`/close 7/12`**：整天關閉。
-- 已被進行中預約（軟鎖定三狀態）佔用的時段**不可關閉**，回覆衝突清單，其餘照關。
-
-**`/slots`**：老師查看本月＋下月的開放/已約狀態總表（純文字，複用 `/list` 的列表風格）：
-```
-✦ 7 月時段
-7/12（日）15:00 16:00 20:00｜已約 1
-7/14（二）15:00 16:00
-✦ 8 月：尚未開放
-```
-
-三個指令都進 `ADMIN_COMMANDS`（keyword pattern：`^/open\b`、`^/close\b`、`^/slots$`，
-注意 pattern 順序與既有指令的優先權，補 `test_keyword_router.py` 案例）。
-
-### 3.2 客人端：時段總覽 carousel（Flex）
-
-**觸發**：新關鍵字 `本週|下週|時段|什麼時候可以` → intent `schedule`（pattern 放在 booking 之前，補測試）。
-回覆一個 **carousel，兩個 bubble：「本週」＋「下週」**（週一為一週之始）。
-
-**Bubble 版式（沿用配色 tokens 與請帖設計語言）**：
-
-```
-┌────────────────────────────┐
-│ HEADER 背景 #3D1F1F         │
-│   本週時段                   │  GOLD, md, bold
-│   7/7 – 7/13                │  DIVIDER 色, xs
-├────────────────────────────┤
-│ BODY 背景 BG_DARK           │
-│  7/12（日）  15:00 16:00 2̶0̶:̶0̶0̶ │  ← 每天一行（見下）
-│  7/14（二）  15:00 16:00      │
-│   ────────  ✦  ────────     │  _ornament_divider()
-│  [    我要預約    ]          │  ACCENT_RED 按鈕 → 文字「我要預約」
-└────────────────────────────┘
+```css
+:root {
+  --bg:        #EFEBE5;
+  --bg-header: #3D1F1F;
+  --gold:      #C2A68C;
+  --title:     #7B3F2A;
+  --ink:       #4A453C;
+  --muted:     #6E675E;
+  --line:      #C8B8A8;
+  --accent:    #8B2020;
+  --sheet:     #FAF8F4;
+}
 ```
 
-- 每天一個 horizontal box：左側日期標籤 `TEXT_TITLE` sm bold（flex 固定寬），
-  右側**單一 text 元件內用 span 陣列**呈現時段：
-  - 可約：span `TEXT_WHITE`
-  - 已被約走（軟鎖定/行事曆佔用）：span `TEXT_GREY` ＋ `"decoration": "line-through"`
-  - 已過去的時段：不顯示
-  - 時段之間以兩個空格分隔
-- 沒有開放時段的日子**不列出**（卡片保持乾淨）；當週全部無開放/已過去 →
-  該 bubble body 置中顯示 ✦＋「本週未開放時段」`TEXT_GREY`。
-- 已被約走的判定：新增 `calendar_service.get_busy_map(start_date, end_date) -> {date: [times]}`
-  ——**一次 freebusy 查詢涵蓋兩週**（timeMin=本週一、timeMax=下週日+1，只打一次 Google API），
-  與 `get_taken_slots` 合併成「不可約」集合。無 Calendar 設定時只用軟鎖定。
-- 實作為 `fm.schedule_overview_carousel(week1, week2)`，資料組裝放 webhook/服務層，
-  卡片函式只負責渲染。
+月曆版式沿用 commit `0bfc091`：深棕頂欄、serif 月份標題與 ✦ 裝飾、週一起始月曆、今日金色細圓環、有時段日期以 1–3 個小點提示、選中日赤褐實心圓、底部時段面板 `--sheet` 背景與 16px 上緣圓角。客人可約 chip 用 `--gold`，已約 chip 用 `--line` 邊框與刪除線，確認 CTA 用 `--accent`。
 
-**與預約流程的關係**：總覽卡是「看」，預約照舊走「我要預約」→ date_picker → time_picker
-（資料源已在 F2 換成 open slots）。總覽 bubble 底部的按鈕發文字「我要預約」接回既有流程。
-歡迎詞（handle_follow）加一行「👉 輸入「時段」查看近兩週可預約時間」。
+老師編輯模式沿用同一版式：URL 有 `?token=` 才顯示「編輯時段」toggle；開啟時頂欄下沿出現 `--gold` 提示線。開放中格點 `--gold` 實心，未開放格點 `--line` 虛線，已有預約而鎖定的格點不可點。
 
-### 3.3 驗收
+### 3.2 後端 API（`app/routers/api.py`）
 
-- [ ] `/open` 多行批次：混合合法/非法行，合法生效、非法逐行回報。
-- [ ] `/close` 關閉已被預約的時段被擋下並列出衝突。
-- [ ] `/slots` 總表與實際 KV 狀態一致。
-- [ ] 客人輸入「時段」看到本週/下週兩頁卡片；已約時段呈灰色刪除線；
-      無開放的一週顯示空狀態文案。
-- [ ] 總覽卡與 date_picker 顯示的可約時段一致（同一套過濾鏈）。
-- [ ] 全流程實測：/open 開時段 → 客人「時段」看到 → 預約 → 總覽卡該時段變刪除線。
+| 端點 | 方法 | 授權 | 功能 |
+|---|---|---|---|
+| `/booking.html` | GET | 公開 | 回月曆 HTML，注入 `BOT_BASIC_ID` |
+| `/api/slots?month=YYYY-MM` | GET | 公開（無個資） | 回 `{open, taken, today, selectableTimes}`。taken 來自進行中預約＋Google freebusy；一次查整月。 |
+| `/api/slots` | POST | `ADMIN_PAGE_TOKEN` | Body `{month, data, token}`。用 `hmac.compare_digest(token, ADMIN_PAGE_TOKEN)` 驗證；通過才整月覆寫 open slots。 |
+
+- `ADMIN_PAGE_TOKEN` 未設定時，POST 一律 403（等於編輯功能停用）。
+- POST 存檔時，若新資料會移除已被進行中預約佔用的時段，回 `409` 與 conflicts 清單，不寫入。
+- GET 維持公開，因為只含開放/占用時段，無個資。
+
+### 3.3 入口改動（webhook.py）
+
+- `booking` intent：第一次仍顯示原則卡；看過原則後，若 `PUBLIC_BASE_URL` 已設定，回 `fm.booking_entry_card()`，URI button 開 `{PUBLIC_BASE_URL}/booking.html`。
+- `時段|本週|下週|什麼時候可以`：同樣回月曆入口卡。
+- `PUBLIC_BASE_URL` 未設定時，退化回既有文字版 `date_picker_card(get_next_available_dates())` → `time_picker_card()` 流程。
+- 移除聊天室開時段機制：不再實作 `/open`、`/close`、`/slots`；老師改在網頁編輯。
+- 移除客人端本週/下週 carousel，網頁月曆就是總覽。
+
+### 3.4 驗收
+
+- [ ] 客人無 token 開 `booking.html`：只看得到月曆與可預約時段，不顯示編輯 UI。
+- [ ] 客人點時段後跳 LINE deep link，聊天室預填「預約 YYYY-MM-DD HH:MM」，後續 webhook 流程完全不變。
+- [ ] `BOT_BASIC_ID` 未設定：送出按鈕退化成「請回聊天室輸入」提示。
+- [ ] 老師開 `booking.html?token=...`：可開啟編輯模式、切換時段、儲存。
+- [ ] 錯 token / 無 `ADMIN_PAGE_TOKEN`：POST `/api/slots` 回 403。
+- [ ] 嘗試關閉已有進行中預約的時段：POST 回 409 + conflicts，該時段不被移除。
+- [ ] `?mock=1` 可在一般瀏覽器檢視客人模式；`?mock=1&token=test` 可檢視老師編輯模式。
 
 ---
 
@@ -255,25 +238,16 @@ parse_open_lines(text) -> tuple[list, list]    # 純函式：解析 /open 多行
 
 | 條件 | 通知 | 對象 |
 |---|---|---|
-| 今天是 25 號 且 下個月 `open:{YYYY-MM}` 為空 | 「✦ {M+1} 月時段尚未開放」＋ `/open` 使用範本＋**本月已開放清單**（方便照抄改日期後直接回傳） | 老師 |
+| 今天是 25 號 且 下個月 `open:{YYYY-MM}` 為空 | 「✦ {M+1} 月時段尚未開放」＋「設定時段」按鈕，連到 `{PUBLIC_BASE_URL}/booking.html?token={ADMIN_PAGE_TOKEN}` | 老師 |
 | 今天是 1 號 | 本月總覽：開放 X 天 Y 時段、已成立預約 Z 筆（掃 done_queue + booking_queue） | 老師 |
 | 明天有已成立（done）的預約 | 「明日預約提醒：{date_label} {time} ✦ 屆時見」 | **每位客人** |
 | 明天有已成立的預約 | 「明日行程：N 筆——{清單}」 | 老師 |
 
-25 號提醒文案範例（重點是老師能直接複製修改）：
+25 號提醒卡重點：
 
-```
-✦ 8 月時段尚未開放
-回覆 /open 開放時段，每行一天，例如：
-
-/open
-8/3 15 16 20
-8/5 15 16
-
-參考：7 月開放的是——
-7/12（日）15 16 20
-7/14（二）15 16
-```
+- 使用 Flex 小卡，按鈕 label：`設定時段`。
+- 連結由後端組：`{PUBLIC_BASE_URL}/booking.html?token={ADMIN_PAGE_TOKEN}`。
+- `PUBLIC_BASE_URL` 或 `ADMIN_PAGE_TOKEN` 未設定時，退化成純文字提醒，告知設定缺漏。
 
 - 明日預約掃描：`get_all_done_bookings()` 過濾 `d == 明天`，逐筆 `push_text_to_user`；失敗照 F1-5 慣例通知老師。
 - 通知文案風格與卡片一致（✦、不堆 emoji）。25 號/1 號這兩個日期做成常數。
@@ -360,26 +334,28 @@ sync_booking_to_crm(pending: dict) -> tuple[bool, str]  # 上面四支的編排�
 
 | 變數 | 功能 | 未設定時的退化行為 |
 |---|---|---|
-| `PUBLIC_BASE_URL` | F1 圖示網址組裝（**結尾不含斜線**） | 卡片純文字版、無圖示 |
+| `PUBLIC_BASE_URL` | F1 圖示網址、F3 月曆入口、F4 老師設定連結（**結尾不含斜線**） | F3 入口退回文字版 date picker；F4 月底提醒改純文字 |
+| `BOT_BASIC_ID` | F3 客人送出時段的 LINE deep link（含 `@`） | 月曆頁送出鈕退化為顯示「請回聊天室輸入」文字 |
+| `ADMIN_PAGE_TOKEN` | F3 老師網頁編輯授權、F4 月底設定連結 | POST `/api/slots` 一律 403；編輯功能停用 |
 | `CRON_SECRET` | F4 | /api/cron 一律 403（cron 靜默失效） |
 | `NOTION_API_KEY` | F5 | CRM 功能整體停用 |
 
 （Notion 兩個 data source ID 直接寫成 crm_service 常數即可，不必進 env——這個 bot 只服務這一個工作室。
-原規劃的 `LIFF_ID`、`LOGIN_CHANNEL_ID` 因改走純 Flex 已**不再需要**；
-若 config.py 已加過請移除，業主先前建立的 LINE Login channel 可閒置或刪除。）
+原規劃的 `LIFF_ID`、`LOGIN_CHANNEL_ID` 已**不再需要**；F3 不使用 LIFF SDK、LINE Login 或 id_token。）
 
 ## 7. 行數預算與防肥大守則
 
 | 新增/修改 | 預算 |
 |---|---|
-| `slots_service.py` | ≤ 140 行（含 `/open` 解析純函式） |
+| `slots_service.py` | ≤ 110 行 |
 | `crm_service.py` | ≤ 150 行 |
-| `api.py` | ≤ 60 行（只剩 cron 端點） |
-| `flex_messages.py` 淨增 | ≤ +130 行（confirmed card 是替換不是增加；新增總覽 carousel 與 crm 預覽卡；`_field`/`_ornament_divider` 抽共用要讓 intake_card 同步瘦身） |
-| `webhook.py` 淨增 | ≤ +130 行（/open /close /slots /crm 指令＋schedule 意圖） |
+| `api.py` | ≤ 150 行（booking.html + slots API + cron） |
+| `booking.html` | ≤ 450 行（含 CSS/JS） |
+| `flex_messages.py` 淨增 | ≤ +110 行（confirmed card 是替換不是增加；新增入口卡與 crm 預覽卡；`_field`/`_ornament_divider` 抽共用要讓 intake_card 同步瘦身） |
+| `webhook.py` 淨增 | ≤ +100 行（月曆入口＋/crm 指令） |
 
 守則：
-1. 不引入新的正式依賴（Notion 用 httpx）。
+1. 不引入新的正式依賴（Notion 用 httpx；月曆頁無框架）。
 2. 每個功能都有「env 未設定 → 優雅退化」路徑，禁止 crash。
 3. 卡片一律複用 `_make_text` / `_make_button` / `_field` / `_ornament_divider` / `_service_card` 這層積木，禁止再貼整坨 JSON 字典。
 4. 測試跟功能同 commit；改動 keyword patterns 必跑 `test_keyword_router.py`（順序即優先權）。
@@ -391,9 +367,7 @@ sync_booking_to_crm(pending: dict) -> tuple[bool, str]  # 上面四支的編排�
 - 不做多管理員、權限系統。
 - 不做付款金流串接；匯款回報三步機制照舊。
 - 不做 Notion → Bot 的反向同步；Notion 端老師手動維護的欄位（玄学能量建议、文墨天機等）代碼永不觸碰。
-- **不做任何網頁介面**（LIFF / LINE MINI App / 一般網頁都不做）——所有互動留在聊天室內；
-  `public/` 只放靜態圖示。若日後 LINE MINI App 門檻降低，可從 git 歷史（commit 0bfc091 的 §3）
-  取回原 LIFF 月曆設計另開規格。
+- 不做 LIFF / LINE MINI App / LINE Login；F3 是一般網頁月曆，授權只靠老師專屬 token 連結。
 
 ---
 
@@ -408,17 +382,18 @@ sync_booking_to_crm(pending: dict) -> tuple[bool, str]  # 上面四支的編排�
 | CRM 同步 | **半自動**：/paid 後推預覽卡，老師按「寫入 CRM」才寫入 Notion |
 | 確認卡片視覺 | **請帖風＋原有暖土配色 tokens**；圖示以 SVG 設計、輸出 PNG 託管（LINE Flex 不支援 SVG） |
 
-2026-07-06 變更（LINE 平台改版導致無法新建 LIFF app）：
+2026-07-06 變更：
 
 | 議題 | 決定 |
 |---|---|
-| 時段總覽介面 | **純 Flex 卡片**：客人用「本週/下週」carousel 總覽，老師用 `/open` 多行批次指令開放時段（§3 已全面改寫） |
+| 時段總覽介面 | **一般網頁月曆（無 LIFF SDK）**：客人從小卡開月曆，送出時跳 LINE deep link；老師用 `?token=` 簽名連結編輯時段 |
 | Google Calendar 串接 | **保留**。純後端使用（freebusy 擋私人行程＋/paid 建立事件），預約者從頭到尾接觸不到業主的日曆，無隱私疑慮 |
 
 ## 附錄 B — 交付前業主 checklist（代碼以外）
 
-1. Vercel env 補上 §6 三個變數（`PUBLIC_BASE_URL` 結尾不含斜線；改完 env 要 Redeploy）。
+1. Vercel env 補上 §6 五個變數（`PUBLIC_BASE_URL` 結尾不含斜線；`BOT_BASIC_ID` 含 `@`；改完 env 要 Redeploy）。
 2. Notion integration 建立並 share CRM 頁（§5.4）。**若 API key 曾在任何對話中貼出，必須先 Regenerate 再填入。**
 3. Vercel 專案確認 Cron Jobs 已啟用（部署後 Settings → Cron Jobs 可見）。
-4. 檢視 `docs/preview-confirmed-card.html` 確認請帖卡視覺後，才進行 F1 實機發送測試。
-5. （已不需要）先前建立的 LINE Login channel（ID 2009266106）可閒置或刪除，本規格不再使用。
+4. 用一般瀏覽器開 `{PUBLIC_BASE_URL}/booking.html?mock=1` 檢查客人模式；開 `{PUBLIC_BASE_URL}/booking.html?mock=1&token=<測試token>` 檢查老師編輯模式。
+5. 檢視 `docs/preview-confirmed-card.html` 確認請帖卡視覺後，才進行 F1 實機發送測試。
+6. （已不需要）LINE Login channel / LIFF app 可閒置或刪除，本規格不再使用。

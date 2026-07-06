@@ -566,76 +566,56 @@ def time_picker_card(date_str: str, slots: list) -> dict:
     }
 
 
-def _week_bubble(title: str, date_range: str, days: list) -> dict:
-    rows = []
-    for day in days:
-        spans = []
-        for item in day["slots"]:
-            span = {"type": "span", "text": item["time"] + "  ", "color": TEXT_WHITE}
-            if item.get("busy"):
-                span["color"] = TEXT_GREY
-                span["decoration"] = "line-through"
-            spans.append(span)
-        rows.append({
-            "type": "box",
-            "layout": "horizontal",
-            "spacing": "sm",
-            "contents": [
-                _make_text(day["label"], size="sm", color=TEXT_TITLE, weight="bold") | {"flex": 2, "wrap": False},
-                {"type": "text", "size": "sm", "wrap": True, "flex": 5, "contents": spans},
-            ],
-        })
-
-    body = rows if rows else [
-        _make_text("✦", size="md", color=GOLD, align="center"),
-        _make_text(f"{title}未開放時段", size="sm", color=TEXT_GREY, align="center"),
-    ]
-
-    return {
-        "type": "bubble",
-        "size": "mega",
-        "styles": {
-            "header": {"backgroundColor": BG_HEADER},
-            "body": {"backgroundColor": BG_DARK},
-            "footer": {"backgroundColor": BG_DARK},
-        },
-        "header": {
-            "type": "box",
-            "layout": "vertical",
-            "paddingAll": "16px",
-            "contents": [
-                _make_text(f"{title}時段", size="md", color=GOLD, weight="bold"),
-                _make_text(date_range, size="xs", color=DIVIDER),
-            ],
-        },
-        "body": {
-            "type": "box",
-            "layout": "vertical",
-            "spacing": "md",
-            "paddingAll": "20px",
-            "contents": [*body, _ornament_divider()],
-        },
-        "footer": {
-            "type": "box",
-            "layout": "vertical",
-            "paddingAll": "20px",
-            "contents": [_make_button("我要預約", "我要預約")],
-        },
-    }
-
-
-def schedule_overview_carousel(week1: dict, week2: dict) -> dict:
+def booking_entry_card(url: str) -> dict:
     return {
         "type": "flex",
-        "altText": "近兩週可預約時段",
+        "altText": "選擇預約時段",
         "contents": {
-            "type": "carousel",
-            "contents": [
-                _week_bubble("本週", week1["range"], week1["days"]),
-                _week_bubble("下週", week2["range"], week2["days"]),
-            ],
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("✦ 選擇方便的時間", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xs", color=DIVIDER, align="center"),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("請開啟月曆查看可預約時段。", color=TEXT_WHITE, align="center"),
+                    _make_text("選好後會回到聊天室送出預約訊息。", size="xs", color=TEXT_GREY, align="center"),
+                    _ornament_divider(),
+                    {
+                        "type": "button",
+                        "action": {"type": "uri", "label": "開啟預約月曆", "uri": url},
+                        "style": "primary",
+                        "color": ACCENT_RED,
+                        "height": "sm",
+                    },
+                ],
+            },
         },
     }
+
+
+def admin_booking_link_card(url: str, title: str) -> dict:
+    card = booking_entry_card(url)
+    card["altText"] = title
+    card["contents"]["header"]["contents"][0]["text"] = f"✦ {title}"
+    card["contents"]["body"]["contents"][0]["text"] = "請開啟月曆設定本月可預約時段。"
+    card["contents"]["body"]["contents"][1]["text"] = "此連結含管理 token，請勿轉傳。"
+    card["contents"]["body"]["contents"][-1]["action"]["label"] = "設定時段"
+    return card
 
 
 def crm_preview_card(payload: dict, customer_label: str) -> dict:

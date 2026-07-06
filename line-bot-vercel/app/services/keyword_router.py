@@ -20,9 +20,6 @@ KEYWORD_PATTERNS = [
     (r"^/list$", "booking_list"),
     (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
-    (r"^/open\b", "open_slots"),
-    (r"^/close\b", "close_slots"),
-    (r"^/slots$", "slots_list"),
     (r"^/crm\b", "crm"),
     (r"^/myid$", "get_my_id"),
 

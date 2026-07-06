@@ -179,6 +179,15 @@ def test_full_booking_lifecycle(line_env):
     assert "已改期" in line_env.replies[-1][0]
 
 
+def test_booking_entry_uses_web_calendar_when_base_url_is_set(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr("app.routers.webhook.has_seen_principles", lambda user_id: True)
+
+    wh.handle_text_message(_mk_event("時段", user_id="cust1"))
+
+    assert line_env.replies[-1] == [("FLEX", "選擇預約時段")]
+
+
 def test_no_rejects_booking_and_notifies_customer(line_env):
     _seed_open_slots(line_env)
     wh.handle_text_message(_mk_event("預約 2026-07-13 15:00", user_id="cust3"))

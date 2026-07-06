@@ -92,13 +92,19 @@ def test_booking_confirmed_card_invitation_style_and_optional_fields():
     assert "生辰" not in body_text
 
 
-def test_schedule_overview_carousel_has_two_bubbles():
-    week = {"range": "7/6 – 7/12", "days": [{"label": "7/12（日）", "slots": [{"time": "15:00", "busy": False}, {"time": "16:00", "busy": True}]}]}
-    card = fm.schedule_overview_carousel(week, {"range": "7/13 – 7/19", "days": []})
-    assert card["altText"] == "近兩週可預約時段"
-    assert card["contents"]["type"] == "carousel"
-    assert len(card["contents"]["contents"]) == 2
-    assert "line-through" in str(card)
+def test_booking_entry_card_uses_uri_button():
+    card = fm.booking_entry_card("https://example.com/booking.html")
+    assert card["altText"] == "選擇預約時段"
+    action = card["contents"]["body"]["contents"][-1]["action"]
+    assert action["type"] == "uri"
+    assert action["uri"] == "https://example.com/booking.html"
+
+
+def test_admin_booking_link_card_mentions_private_token_link():
+    card = fm.admin_booking_link_card("https://example.com/booking.html?token=t", "8 月時段尚未開放")
+    assert card["altText"] == "8 月時段尚未開放"
+    assert "請勿轉傳" in str(card["contents"])
+    assert card["contents"]["body"]["contents"][-1]["action"]["label"] == "設定時段"
 
 
 def test_crm_preview_card_buttons():
