@@ -50,6 +50,7 @@ from app.services.state_service import (
     set_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
+    enqueue_crm, get_crm_queue, remove_crm_queue_item,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -58,6 +59,7 @@ from app.services.calendar_service import (
     update_event,
     format_date_label,
 )
+from app.services.crm_service import find_customer_by_line_id, sync_booking_to_crm
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,11 @@ def is_admin(user_id: str) -> bool:
 def _parse_booking_number(text: str) -> int | None:
     """從指令文字中解析編號，例如 '/ok 2' → 2，'/ok' → None。"""
     m = re.search(r"/(?:ok|no|paid)\s+(\d+)", text)
+    return int(m.group(1)) if m else None
+
+
+def _parse_trailing_number(text: str) -> int | None:
+    m = re.search(r"\s+(\d+)\s*$", text)
     return int(m.group(1)) if m else None
 
 
@@ -198,6 +205,23 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
             name = lines[0]
 
     return name, birth, question
+
+
+def _booking_url() -> str:
+    base = settings.public_base_url.rstrip("/")
+    return f"{base}/booking.html" if base else ""
+
+
+def _reply_booking_entry_or_fallback(event):
+    url = _booking_url()
+    if url:
+        reply_flex(event, fm.booking_entry_card(url))
+        return
+    dates = get_next_available_dates()
+    if dates:
+        reply_flex(event, fm.date_picker_card(dates))
+    else:
+        reply_text(event, "本月時段尚未開放，請稍候。")
 
 
 # ============================================================
@@ -328,6 +352,20 @@ def _cmd_booking_paid(event, user_id, text):
     # 完成後存入 done 區（供改期使用）
     save_done_booking(ref, booking, cal_event_id)
     delete_booking(ref)
+
+    if settings.notion_api_key:
+        payload = {
+            "u": ctx_user,
+            "n": booking["n"],
+            "b": intake_birth,
+            "q": intake_question,
+            "d": booking["d"],
+            "t": booking["t"],
+        }
+        if enqueue_crm(payload):
+            existing = find_customer_by_line_id(ctx_user)
+            customer_label = "老客戶" if existing else "新客戶"
+            notify_admin_flex(ctx_user, fm.crm_preview_card(payload, customer_label), prefix_text="CRM 資料待確認")
 
     if cal_ok:
         cal_status = "行事曆已建立 📅"
@@ -479,6 +517,52 @@ def _cmd_booking_change(event, user_id, text):
     )
 
 
+def _pick_crm_item(event, number: int | None):
+    queue = get_crm_queue()
+    if not queue:
+        reply_text(event, "目前沒有待處理的 CRM 資料。")
+        return None
+    if number is None and len(queue) == 1:
+        return queue[0]
+    if number is None:
+        lines = [f"目前有 {len(queue)} 筆待寫入 CRM：\n"]
+        for item in queue:
+            p = item["payload"]
+            lines.append(f"  {item['index']}. {p.get('n', '')}｜{p.get('d', '')} {p.get('t', '')}")
+        lines.append("\n請回覆 /crm ok 1 或 /crm skip 1")
+        reply_text(event, "\n".join(lines))
+        return None
+    for item in queue:
+        if item["index"] == number:
+            return item
+    reply_text(event, f"編號 {number} 不存在，目前只有 {len(queue)} 筆。")
+    return None
+
+
+def _cmd_crm(event, user_id, text):
+    if re.fullmatch(r"/crm\s*$", text):
+        _pick_crm_item(event, None)
+        return
+    if re.search(r"/crm\s+ok", text):
+        item = _pick_crm_item(event, _parse_trailing_number(text))
+        if not item:
+            return
+        ok, msg = sync_booking_to_crm(item["payload"])
+        if ok:
+            remove_crm_queue_item(item["raw"])
+            reply_text(event, f"已寫入 ✦ {item['payload'].get('n', '')}（{msg}）")
+        else:
+            reply_text(event, f"寫入失敗：{msg}\n資料已保留，可稍後重試。")
+        return
+    if re.search(r"/crm\s+skip", text):
+        item = _pick_crm_item(event, _parse_trailing_number(text))
+        if item:
+            remove_crm_queue_item(item["raw"])
+            reply_text(event, f"已略過 ✦ {item['payload'].get('n', '')}")
+        return
+    reply_text(event, "格式：/crm、/crm ok [編號]、/crm skip [編號]")
+
+
 ADMIN_COMMANDS = {
     "bot_off": _cmd_bot_off,
     "bot_on": _cmd_bot_on,
@@ -488,6 +572,7 @@ ADMIN_COMMANDS = {
     "booking_list": _cmd_booking_list,
     "booking_clear": _cmd_booking_clear,
     "booking_change": _cmd_booking_change,
+    "crm": _cmd_crm,
 }
 
 
@@ -497,6 +582,7 @@ ADMIN_COMMANDS = {
 INTENT_HANDLERS = {
     # --- 主要動作 ---
     "services": lambda event, text: reply_flex(event, fm.service_menu()),
+    "schedule": lambda event, text: _reply_booking_entry_or_fallback(event),
 
     # --- 價格防禦 ---
     "pricing": lambda event, text: reply_text(
@@ -537,6 +623,7 @@ def handle_follow(event: FollowEvent):
             "歡迎來到「百無禁忌」。\n\n"
             "我是工作室的助理，有任何問題都可以問我。\n\n"
             "👉 輸入「服務項目」查看我們的服務\n"
+            "👉 輸入「時段」開啟預約月曆\n"
             "👉 輸入「我要預約」直接預約諮詢\n"
             "👉 輸入「找小夏老師」由老師親自回覆"
         )
@@ -683,11 +770,7 @@ def handle_text_message(event: MessageEvent):
                 reply_flex(event, fm.principles_card())
                 return
             # 已看過原則：直接進日期選擇
-            if settings.google_service_account_json and settings.google_calendar_id:
-                dates = get_next_available_dates()
-                reply_flex(event, fm.date_picker_card(dates))
-            else:
-                reply_flex(event, fm.booking_card())
+            _reply_booking_entry_or_fallback(event)
             return
 
         # Step 2：客人選了日期 → 查空檔 → 顯示時段
@@ -714,6 +797,9 @@ def handle_text_message(event: MessageEvent):
                 time_str = m.group(2)
                 date_label = format_date_label(date_str)
                 user_name = get_user_name(user_id, configuration)
+                if time_str not in get_available_slots(date_str):
+                    reply_text(event, "這個時段目前無法預約，請輸入「我要預約」重新選擇。")
+                    return
 
                 # 儲存預約（狀態：pending，等管理員確認日期）
                 save_booking(user_id, date_str, time_str, user_name)

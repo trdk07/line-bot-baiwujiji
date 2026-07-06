@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>百無禁忌研究所｜預約時段</title>
+  <style>
+    :root {
+      --bg: #EFEBE5;
+      --bg-header: #3D1F1F;
+      --gold: #C2A68C;
+      --title: #7B3F2A;
+      --ink: #4A453C;
+      --muted: #6E675E;
+      --line: #C8B8A8;
+      --accent: #8B2020;
+      --sheet: #FAF8F4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, "PingFang TC", sans-serif;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--bg-header);
+      color: var(--gold);
+      text-align: center;
+      padding: 18px 16px 14px;
+      box-shadow: 0 4px 18px rgba(61,31,31,.08);
+    }
+    header.editing { border-bottom: 2px solid var(--gold); }
+    h1, .month-title, .panel-title {
+      font-family: "Noto Serif TC", "Songti TC", "PMingLiU", serif;
+      letter-spacing: 0;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    .subtitle { margin-top: 3px; color: var(--line); font-size: 12px; }
+    .edit-toggle {
+      position: absolute;
+      right: 14px;
+      top: 20px;
+      display: none;
+      width: 44px;
+      height: 24px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      padding: 2px;
+    }
+    .edit-toggle span {
+      display: block;
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      background: var(--line);
+      transition: transform 150ms ease-out, background 150ms ease-out;
+    }
+    .edit-toggle.on span { transform: translateX(18px); background: var(--gold); }
+    main { max-width: 560px; margin: 0 auto; padding: 18px 16px 148px; }
+    .month-nav {
+      display: grid;
+      grid-template-columns: 44px 1fr 44px;
+      align-items: center;
+      margin: 4px 0 16px;
+    }
+    .nav-btn {
+      border: 0;
+      background: transparent;
+      color: var(--gold);
+      font-size: 28px;
+      line-height: 44px;
+    }
+    .month-title {
+      text-align: center;
+      color: var(--title);
+      font-weight: 700;
+      font-size: 22px;
+    }
+    .month-title::before, .month-title::after { content: "✦"; color: var(--gold); font-size: 12px; margin: 0 10px; }
+    .weekdays, .grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+    .weekdays { color: var(--muted); font-size: 12px; text-align: center; margin-bottom: 8px; }
+    .day {
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      min-height: 58px;
+      padding: 7px 2px 4px;
+      border-radius: 8px;
+      position: relative;
+    }
+    .day[disabled] { color: var(--line); }
+    .num {
+      display: inline-grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      margin: 0 auto;
+    }
+    .today .num { outline: 1px solid var(--gold); }
+    .selected .num { background: var(--title); color: var(--bg); }
+    .dots { display: flex; justify-content: center; gap: 3px; margin-top: 5px; min-height: 5px; }
+    .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+    .full .dot { background: var(--line); }
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 64px 20px;
+      line-height: 1.8;
+    }
+    .sheet {
+      position: fixed;
+      left: 50%;
+      bottom: 0;
+      width: min(100%, 560px);
+      transform: translateX(-50%);
+      background: var(--sheet);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -8px 28px rgba(61,31,31,.08);
+      padding: 12px 18px calc(18px + env(safe-area-inset-bottom));
+      transition: transform 150ms ease-out;
+    }
+    .sheet.hidden { transform: translate(-50%, 100%); }
+    .handle { width: 42px; height: 3px; border-radius: 999px; background: var(--line); margin: 0 auto 12px; }
+    .panel-title { color: var(--title); font-weight: 700; text-align: center; font-size: 18px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 10px; }
+    .chip {
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 13px;
+      background: var(--gold);
+      color: #FFFFFF;
+      font-weight: 700;
+      min-width: 74px;
+    }
+    .chip.busy {
+      background: transparent;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      text-decoration: line-through;
+    }
+    .chip.off {
+      background: transparent;
+      border: 1px dashed var(--line);
+      color: var(--muted);
+    }
+    .chip.locked {
+      background: var(--line);
+      color: var(--muted);
+      text-decoration: line-through;
+    }
+    .chip.selected { background: var(--title); }
+    .hint { color: var(--muted); font-size: 12px; text-align: center; margin: 8px 0; }
+    .cta, .save {
+      width: 100%;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #FFFFFF;
+      font-weight: 700;
+      padding: 13px 14px;
+      margin-top: 8px;
+    }
+    .cta[disabled], .save[disabled] { opacity: .45; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 130px;
+      transform: translateX(-50%);
+      background: var(--bg-header);
+      color: var(--gold);
+      border-radius: 8px;
+      padding: 10px 14px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 150ms ease-out;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header id="top">
+    <h1>百無禁忌研究所</h1>
+    <div class="subtitle">預約時段</div>
+    <button class="edit-toggle" id="editToggle" aria-label="編輯時段"><span></span></button>
+  </header>
+  <main>
+    <div class="month-nav">
+      <button class="nav-btn" id="prev" aria-label="上個月">‹</button>
+      <div class="month-title" id="monthTitle"></div>
+      <button class="nav-btn" id="next" aria-label="下個月">›</button>
+    </div>
+    <div class="weekdays"><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div></div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" hidden>✦<br>本月時段尚未開放，請稍候</div>
+  </main>
+  <section class="sheet hidden" id="sheet">
+    <div class="handle"></div>
+    <div class="panel-title" id="panelTitle"></div>
+    <div class="chips" id="chips"></div>
+    <div class="hint" id="hint">送出後老師確認日期會再通知您</div>
+    <button class="cta" id="cta" disabled>確認預約</button>
+    <button class="save" id="save" hidden>儲存</button>
+  </section>
+  <div class="toast" id="toast"></div>
+  <script>
+    const BOT_BASIC_ID = __BOT_BASIC_ID__;
+    const qs = new URLSearchParams(location.search);
+    const adminToken = qs.get("token") || "";
+    const mock = qs.get("mock") === "1";
+    const today = new Date();
+    let cursor = new Date(today.getFullYear(), today.getMonth(), 1);
+    let payload = {open: {}, taken: {}, today: today.toISOString().slice(0, 10), selectableTimes: []};
+    let selectedDate = "";
+    let selectedTime = "";
+    let editing = false;
+
+    const $ = (id) => document.getElementById(id);
+    const pad = (n) => String(n).padStart(2, "0");
+    const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+    const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const label = (s) => {
+      const d = new Date(`${s}T00:00:00+08:00`);
+      return `${d.getMonth() + 1}/${d.getDate()}（${"日一二三四五六"[d.getDay()]}）`;
+    };
+    const toast = (msg) => {
+      $("toast").textContent = msg;
+      $("toast").classList.add("show");
+      setTimeout(() => $("toast").classList.remove("show"), 1500);
+    };
+
+    async function load() {
+      const month = monthKey(cursor);
+      if (mock) {
+        payload = {
+          today: payload.today,
+          selectableTimes: ["13:00","14:00","15:00","16:00","20:00","21:00","22:00","23:00","00:00"],
+          open: {[`${month}-12`]: ["15:00","16:00","20:00"], [`${month}-18`]: ["14:00","15:00"]},
+          taken: {[`${month}-12`]: ["16:00"]}
+        };
+      } else {
+        const res = await fetch(`/api/slots?month=${month}`);
+        payload = await res.json();
+      }
+      render();
+    }
+
+    function render() {
+      const month = monthKey(cursor);
+      $("monthTitle").textContent = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
+      $("editToggle").style.display = adminToken ? "block" : "none";
+      $("editToggle").classList.toggle("on", editing);
+      $("top").classList.toggle("editing", editing);
+      const grid = $("grid");
+      grid.innerHTML = "";
+      const first = new Date(cursor);
+      const startOffset = (first.getDay() + 6) % 7;
+      const days = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+      const hasOpen = Object.keys(payload.open || {}).some((d) => d.startsWith(month));
+      $("empty").hidden = hasOpen || editing;
+      for (let i = 0; i < startOffset; i++) grid.appendChild(document.createElement("div"));
+      for (let day = 1; day <= days; day++) {
+        const d = new Date(cursor.getFullYear(), cursor.getMonth(), day);
+        const key = dateKey(d);
+        const open = payload.open[key] || [];
+        const busy = new Set(payload.taken[key] || []);
+        const remain = open.filter((t) => !busy.has(t) && !isPast(key, t));
+        const btn = document.createElement("button");
+        btn.className = "day";
+        if (key === payload.today) btn.classList.add("today");
+        if (key === selectedDate) btn.classList.add("selected");
+        if (open.length && !remain.length) btn.classList.add("full");
+        btn.disabled = !editing && !remain.length;
+        btn.innerHTML = `<span class="num">${day}</span><span class="dots">${dots(open.length ? Math.max(1, Math.min(3, editing ? open.length : remain.length)) : 0)}</span>`;
+        btn.onclick = () => selectDay(key);
+        grid.appendChild(btn);
+      }
+    }
+
+    function dots(n) {
+      return Array.from({length: n}, () => `<span class="dot"></span>`).join("");
+    }
+
+    function isPast(dateStr, timeStr) {
+      const actual = new Date(`${dateStr}T${timeStr}:00+08:00`);
+      if (timeStr === "00:00") actual.setDate(actual.getDate() + 1);
+      return actual <= new Date(`${payload.today}T00:00:00+08:00`) && actual < new Date();
+    }
+
+    function selectDay(dateStr) {
+      selectedDate = dateStr;
+      selectedTime = "";
+      $("panelTitle").textContent = `✦ ${label(dateStr)} ✦`;
+      $("sheet").classList.remove("hidden");
+      drawChips();
+      render();
+    }
+
+    function drawChips() {
+      const chips = $("chips");
+      chips.innerHTML = "";
+      const open = new Set(payload.open[selectedDate] || []);
+      const busy = new Set(payload.taken[selectedDate] || []);
+      const times = editing ? payload.selectableTimes : [...open];
+      times.forEach((time) => {
+        if (!editing && isPast(selectedDate, time)) return;
+        const b = document.createElement("button");
+        b.textContent = time + (editing && busy.has(time) ? " ⚿" : "");
+        b.className = "chip";
+        if (busy.has(time)) b.classList.add(editing ? "locked" : "busy");
+        if (editing && !open.has(time)) b.classList.add("off");
+        if (!editing && time === selectedTime) b.classList.add("selected");
+        b.disabled = busy.has(time);
+        b.onclick = () => editing ? toggleTime(time) : chooseTime(time);
+        chips.appendChild(b);
+      });
+      $("hint").textContent = editing ? "已有預約的時段不可關閉" : (BOT_BASIC_ID ? "送出後老師確認日期會再通知您" : "請回聊天室輸入同樣文字完成預約");
+      $("cta").hidden = editing;
+      $("save").hidden = !editing;
+      $("cta").disabled = !selectedTime;
+    }
+
+    function toggleTime(time) {
+      const list = new Set(payload.open[selectedDate] || []);
+      list.has(time) ? list.delete(time) : list.add(time);
+      payload.open[selectedDate] = [...list].sort((a, b) => (a === "00:00" ? 24 : parseInt(a)) - (b === "00:00" ? 24 : parseInt(b)));
+      if (!payload.open[selectedDate].length) delete payload.open[selectedDate];
+      drawChips();
+      render();
+    }
+
+    function chooseTime(time) {
+      selectedTime = time;
+      $("cta").textContent = `確認預約 ${label(selectedDate)} ${time}`;
+      $("cta").disabled = false;
+      drawChips();
+    }
+
+    $("cta").onclick = () => {
+      const msg = `預約 ${selectedDate} ${selectedTime}`;
+      if (!BOT_BASIC_ID) {
+        toast(`請回聊天室輸入：${msg}`);
+        return;
+      }
+      location.href = `https://line.me/R/oaMessage/${BOT_BASIC_ID}/?${encodeURIComponent(msg)}`;
+    };
+    $("save").onclick = async () => {
+      $("save").disabled = true;
+      try {
+        const res = await fetch("/api/slots", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({month: monthKey(cursor), data: payload.open, token: adminToken})
+        });
+        if (res.status === 409) toast("已有預約的時段不可移除");
+        else if (!res.ok) toast("儲存失敗");
+        else toast("已更新 ✦");
+        await load();
+      } finally {
+        $("save").disabled = false;
+      }
+    };
+    $("editToggle").onclick = () => {
+      editing = !editing;
+      if (selectedDate) drawChips();
+      render();
+    };
+    $("prev").onclick = () => {
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1);
+      selectedDate = "";
+      $("sheet").classList.add("hidden");
+      load();
+    };
+    $("next").onclick = () => {
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+      selectedDate = "";
+      $("sheet").classList.add("hidden");
+      load();
+    };
+    load();
+  </script>
+</body>
+</html>

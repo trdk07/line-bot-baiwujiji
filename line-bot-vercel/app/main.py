@@ -4,7 +4,7 @@
 
 import logging
 from fastapi import FastAPI
-from app.routers import webhook
+from app.routers import api, webhook
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +15,7 @@ app = FastAPI(
 
 # --- 掛載路由 ---
 app.include_router(webhook.router)
+app.include_router(api.router)
 
 
 # --- Health Check ---

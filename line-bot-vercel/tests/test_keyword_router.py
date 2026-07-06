@@ -24,6 +24,8 @@ POSITIVE_CASES = [
     ("/clear yes", "booking_clear"),
     ("/change 2026-03-01 14:00", "booking_change"),
     ("/change 1 2026-03-01 14:00", "booking_change"),
+    ("/crm", "crm"),
+    ("/crm ok 1", "crm"),
     ("/myid", "get_my_id"),
 
     # --- 諮詢資料後備格式 ---
@@ -49,6 +51,8 @@ POSITIVE_CASES = [
     # --- 預約流程 ---
     ("預約 2026-03-01 14:00", "booking_confirm"),
     ("預約 2026-03-01", "booking_date"),
+    ("時段", "schedule"),
+    ("什麼時候可以", "schedule"),
     ("我要預約", "booking"),
     ("想預約", "booking"),
 
@@ -88,6 +92,9 @@ NEGATIVE_CASES = [
     "謝謝",
     "",
     "今天天氣真好",
+    "/open\n7/12 15",
+    "/close 7/12 15",
+    "/slots",
 ]
 
 
