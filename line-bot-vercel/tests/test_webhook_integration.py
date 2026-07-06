@@ -134,7 +134,7 @@ def test_admin_bot_toggle(line_env):
 
 def test_myid_available_to_non_admin(line_env):
     wh.handle_text_message(_mk_event("/myid", user_id="cust1"))
-    assert line_env.replies[-1] == ["你的 LINE User ID：\ncust1"]
+    assert line_env.replies[-1] == ["你的 LINE User ID：\ncust1\n\n⚠️ 這支帳號不是目前設定的管理員\nADMIN_LINE_USER_ID：已設定"]
 
 
 def test_ok_with_no_pending_bookings(line_env):

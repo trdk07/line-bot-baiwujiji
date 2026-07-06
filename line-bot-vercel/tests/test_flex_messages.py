@@ -111,3 +111,18 @@ def test_crm_preview_card_buttons():
     card = fm.crm_preview_card({"n": "王小明", "b": "", "q": "問題", "d": "2026-07-12", "t": "15:00"}, "新客戶")
     assert "/crm ok" in _button_texts(card)
     assert "/crm skip" in _button_texts(card)
+
+
+def test_payment_info_card_centers_qr_image():
+    card = fm.payment_info_card("7/12（日）", "15:00", "https://example.com/qr.png")
+    body = card["contents"]["body"]["contents"]
+    image = next(item for item in body if item.get("type") == "image")
+    assert image["url"] == "https://example.com/qr.png"
+    assert image["align"] == "center"
+    assert image["aspectMode"] == "fit"
+
+
+def test_ornament_divider_is_center_aligned():
+    card = fm.booking_confirmed_card("王小明", "7/12（日）", "15:00")
+    dividers = [item for item in card["contents"]["body"]["contents"] if item.get("type") == "box" and item.get("alignItems") == "center"]
+    assert dividers
