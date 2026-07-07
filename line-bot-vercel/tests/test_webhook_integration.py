@@ -134,7 +134,7 @@ def test_admin_bot_toggle(line_env):
 
 def test_myid_available_to_non_admin(line_env):
     wh.handle_text_message(_mk_event("/myid", user_id="cust1"))
-    assert line_env.replies[-1] == ["你的 LINE User ID：\ncust1"]
+    assert line_env.replies[-1] == ["你的 LINE User ID：\ncust1\n\n⚠️ 這支帳號不是目前設定的管理員\nADMIN_LINE_USER_ID：已設定"]
 
 
 def test_ok_with_no_pending_bookings(line_env):
@@ -154,13 +154,18 @@ def test_full_booking_lifecycle(line_env):
 
     # 選擇日期+時段 → 建立 pending 預約，通知管理員
     wh.handle_text_message(_mk_event("預約 2026-07-12 15:00", user_id="cust1"))
-    assert "預約申請已送出" in line_env.replies[-1][0]
+    # Stepwise intake should ask for the customer name while admin still receives booking request.
+    assert "請直接回覆您的姓名" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "admin1"
     assert "📅 預約申請" in line_env.pushes[-1][1][0]
 
     # 管理員 /ok → 發匯款資訊
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
     assert "匯款資訊已發送給客人" in line_env.replies[-1][0]
+
+    # 管理員 /ok 後仍可補填諮詢資料
+    wh.handle_text_message(_mk_event("姓名：王小明 出生年月日時：1990-01-01 08:00 問題：想問工作", user_id="cust1"))
+    assert "已收到您的諮詢資料" in line_env.replies[-1][0]
 
     # 客人回報已匯款
     wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
@@ -264,7 +269,34 @@ def test_intake_pending_captures_full_name_and_birth(line_env):
     wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01\n3. 想問工作", user_id="cust1"))
     assert "已收到您的諮詢資料" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "admin1"
+    assert "王小明" in line_env.kv.store["intake_data:cust1"]
 
+
+
+def test_intake_pending_rejects_placeholder_template_and_keeps_waiting(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("1. 姓名\n2. 出生年月日時\n3. 想問的問題", user_id="cust1"))
+    assert "請直接回覆您的姓名" in line_env.replies[-1][0]
+    assert "intake_data:cust1" not in line_env.kv.store
+    assert line_env.kv.store["intake_pending:cust1"] == "1"
+
+    wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01 08:00\n3. 想問工作", user_id="cust1"))
+    assert "已收到您的諮詢資料" in line_env.replies[-1][0]
+    assert "王小明" in line_env.kv.store["intake_data:cust1"]
+
+
+def test_intake_pending_rejects_incomplete_free_text_and_keeps_waiting(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+
+    line_env.replies.clear()
+    wh.handle_text_message(_mk_event("王小明 1990-01-01 想問工作", user_id="cust1"))
+    assert "請直接回覆出生年月日時" in line_env.replies[-1][0]
+    assert "intake_data:cust1" not in line_env.kv.store
+    assert line_env.kv.store["intake_pending:cust1"] == "1"
 
 def test_intake_pending_does_not_swallow_other_intent(line_env):
     _seed_open_slots(line_env)
