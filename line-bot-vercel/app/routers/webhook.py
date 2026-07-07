@@ -50,7 +50,7 @@ from app.services.state_service import (
     set_intake_pending, clear_intake_pending,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
-    enqueue_crm, get_crm_queue, remove_crm_queue_item,
+    enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -69,6 +69,19 @@ router = APIRouter()
 settings = get_settings()
 handler = WebhookHandler(settings.line_channel_secret)
 configuration = Configuration(access_token=settings.line_channel_access_token)
+
+
+INTAKE_TEMPLATE_TEXT = "1. 姓名\n2. 出生年月日時\n3. 想問的問題"
+INTAKE_PLACEHOLDERS = {"姓名", "出生年月日時", "出生年月日", "想問的問題", "想了解的問題", "問題"}
+INTAKE_PROMPT_TEXT = (
+    "預約申請已送出 ✓\n\n"
+    "小夏老師確認後會通知您，請稍候。\n\n"
+    "也請先填寫諮詢資料，老師確認預約時會一併查閱。"
+)
+INTAKE_RETRY_TEXT = (
+    "剛剛收到的是格式範例，還不是您的資料。\n\n"
+    "請把「姓名／出生年月日時／想問的問題」改成您的實際內容後，再一次送出。"
+)
 
 
 # ============================================================
@@ -181,17 +194,45 @@ def _pick_booking(status: str, number: int | None, event, no_entry_msg: str | No
         return None, None, None
 
 
+def _strip_intake_label(value: str, labels: tuple[str, ...]) -> str:
+    """移除使用者填寫諮詢資料時常見的欄位名稱前綴。"""
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    return re.sub(rf"^\s*(?:{label_pattern})\s*[:：,，、-]?\s*", "", value).strip()
+
+
+
+def _parse_labeled_intake(text: str) -> tuple[str, str, str]:
+    """解析「姓名：... 出生年月日時：... 問題：...」格式，可分行或同一行。"""
+    name_labels = r"(?:姓名|名字|大名|本名|姓名名字)"
+    birth_labels = r"(?:出生年月日時|出生年月日|出生時間|生日|生辰|生辰八字)"
+    question_labels = r"(?:想問的問題|想了解的問題|問題|提問|詢問)"
+    sep = r"\s*[:：,，、-]?\s*"
+    name_m = re.search(name_labels + sep + r"(.+?)(?=" + birth_labels + sep + r"|" + question_labels + sep + r"|\Z)", text, re.DOTALL)
+    birth_m = re.search(birth_labels + sep + r"(.+?)(?=" + question_labels + sep + r"|\Z)", text, re.DOTALL)
+    quest_m = re.search(question_labels + sep + r"(.+)", text, re.DOTALL)
+    return (
+        name_m.group(1).strip() if name_m else "",
+        birth_m.group(1).strip() if birth_m else "",
+        quest_m.group(1).strip() if quest_m else "",
+    )
+
 def _parse_intake_text(text: str) -> tuple[str, str, str]:
     """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
-    優先比對 1. / 1- / 1、格式，找不到就按行分割。
+    優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按標籤或行分割。
     """
-    name_m = re.search(r"1[.\-、．]\s*(.+?)(?=2[.\-、．]|\Z)", text, re.DOTALL)
-    birth_m = re.search(r"2[.\-、．]\s*(.+?)(?=3[.\-、．]|\Z)", text, re.DOTALL)
-    quest_m = re.search(r"3[.\-、．]\s*(.+)", text, re.DOTALL)
+    marker = r"(?:^|\n)\s*{}(?:[.\-、．]|\s+)\s*"
+    name_m = re.search(marker.format(1) + r"(.+?)(?=" + marker.format(2) + r"|\Z)", text, re.DOTALL)
+    birth_m = re.search(marker.format(2) + r"(.+?)(?=" + marker.format(3) + r"|\Z)", text, re.DOTALL)
+    quest_m = re.search(marker.format(3) + r"(.+)", text, re.DOTALL)
 
     name = name_m.group(1).strip() if name_m else ""
     birth = birth_m.group(1).strip() if birth_m else ""
     question = quest_m.group(1).strip() if quest_m else ""
+
+    if not (name and birth):
+        labeled_name, labeled_birth, labeled_question = _parse_labeled_intake(text)
+        if labeled_name and labeled_birth:
+            name, birth, question = labeled_name, labeled_birth, labeled_question
 
     if not (name and birth):
         lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
@@ -203,6 +244,10 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
             name, birth = lines[0], lines[1]
         elif len(lines) == 1:
             name = lines[0]
+
+    name = _strip_intake_label(name, ("姓名", "名字", "大名", "本名", "姓名名字"))
+    birth = _strip_intake_label(birth, ("出生年月日時", "出生年月日", "出生時間", "生日", "生辰", "生辰八字"))
+    question = _strip_intake_label(question, ("想問的問題", "想了解的問題", "問題", "提問", "詢問"))
 
     return name, birth, question
 
@@ -218,6 +263,23 @@ def _admin_booking_url() -> str:
         return ""
     return f"{url}?token={settings.admin_page_token}"
 
+
+
+def _is_placeholder_intake(name: str, birth_date: str, question: str) -> bool:
+    values = [name.strip(), birth_date.strip(), question.strip()]
+    return any(value in INTAKE_PLACEHOLDERS for value in values if value)
+
+
+def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt_text: str = INTAKE_PROMPT_TEXT):
+    reply_flex(
+        event,
+        fm.intake_prompt_card(
+            prompt_text,
+            INTAKE_TEMPLATE_TEXT,
+            date_label=date_label,
+            time_str=time_str,
+        ),
+    )
 
 def _reply_booking_entry_or_fallback(event):
     url = _booking_url()
@@ -274,9 +336,6 @@ def _cmd_booking_ok(event, user_id, text):
             f"請稍後再試一次 /ok，或直接手動通知客人匯款資訊。"
         )
         return
-
-    # 付款流程開始，清除諮詢資料等待狀態（避免客人問 QR Code 被誤抓）
-    clear_intake_pending(ctx_user)
 
     # 推送匯款 QR Code 卡片給客人
     push_ok = push_flex_to_user(
@@ -351,15 +410,17 @@ def _cmd_booking_paid(event, user_id, text):
     # 建立 Google Calendar 事件
     cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
 
-    # 取得諮詢資料（出生年月日、問題）
-    intake_birth, intake_question = get_intake_data(ctx_user)
+    # 取得諮詢資料（姓名、出生年月日、問題）
+    intake_name, intake_birth, intake_question = get_intake_data(ctx_user)
+    customer_name = intake_name or booking["n"]
     clear_intake_data(ctx_user)
+    clear_intake_pending(ctx_user)
 
     # 通知客人：預約確認卡片
     push_ok = push_flex_to_user(
         ctx_user,
         fm.booking_confirmed_card(
-            booking["n"], date_label, booking["t"],
+            customer_name, date_label, booking["t"],
             birth_date=intake_birth, question=intake_question,
         ),
     )
@@ -371,7 +432,7 @@ def _cmd_booking_paid(event, user_id, text):
     if settings.notion_api_key:
         payload = {
             "u": ctx_user,
-            "n": booking["n"],
+            "n": customer_name,
             "b": intake_birth,
             "q": intake_question,
             "d": booking["d"],
@@ -519,6 +580,9 @@ def _cmd_booking_change(event, user_id, text):
         cal_ok, cal_error = update_event(booking["cal_id"], new_date, new_time, booking["n"])
         cal_status = "\n行事曆已更新 📅" if cal_ok else f"\n⚠️ 行事曆更新失敗：{cal_error}"
 
+    crm_updated = update_crm_booking_datetime(ctx_user, new_date, new_time)
+    crm_status = "" if not crm_updated else f"\nCRM 待確認資料已更新 {crm_updated} 筆"
+
     push_ok = push_flex_to_user(ctx_user, fm.booking_rescheduled_card(booking["n"], new_date_label, new_time))
     push_status = "" if push_ok else "\n⚠️ 推送改期通知給客人失敗，請手動聯繫客人。"
 
@@ -528,6 +592,7 @@ def _cmd_booking_change(event, user_id, text):
         f"原：{old_date_label} {old_time}\n"
         f"新：{new_date_label} {new_time}"
         f"{cal_status}"
+        f"{crm_status}"
         f"{push_status}",
     )
 
@@ -566,6 +631,9 @@ def _cmd_crm(event, user_id, text):
         if ok:
             remove_crm_queue_item(item["raw"])
             reply_text(event, f"已寫入 ✦ {item['payload'].get('n', '')}（{msg}）")
+            url = _admin_booking_url()
+            if url:
+                push_flex_to_user(user_id, fm.admin_booking_link_card(url, "設定可預約時段"))
         else:
             reply_text(event, f"寫入失敗：{msg}\n資料已保留，可稍後重試。")
         return
@@ -574,6 +642,9 @@ def _cmd_crm(event, user_id, text):
         if item:
             remove_crm_queue_item(item["raw"])
             reply_text(event, f"已略過 ✦ {item['payload'].get('n', '')}")
+            url = _admin_booking_url()
+            if url:
+                push_flex_to_user(user_id, fm.admin_booking_link_card(url, "設定可預約時段"))
         return
     reply_text(event, "格式：/crm、/crm ok [編號]、/crm skip [編號]")
 
@@ -668,7 +739,14 @@ def handle_text_message(event: MessageEvent):
     intent = match_keyword(user_text)
 
     if intent == "get_my_id":
-        reply_text(event, f"你的 LINE User ID：\n{user_id}")
+        admin_status = "✅ 這支帳號目前是管理員" if is_admin(user_id) else "⚠️ 這支帳號不是目前設定的管理員"
+        configured = "已設定" if settings.admin_line_user_id else "尚未設定"
+        reply_text(
+            event,
+            f"你的 LINE User ID：\n{user_id}\n\n"
+            f"{admin_status}\n"
+            f"ADMIN_LINE_USER_ID：{configured}",
+        )
         return
 
     if intent in ADMIN_COMMANDS:
@@ -695,10 +773,13 @@ def handle_text_message(event: MessageEvent):
     if not is_admin(user_id) and intake_pending:
         name, birth_date, question = _parse_intake_text(user_text)
         looks_like_intake = bool(name and birth_date)
-        if intent is None or looks_like_intake:
+        if _is_placeholder_intake(name, birth_date, question) or (intent is None and not looks_like_intake):
+            _reply_intake_prompt(event, prompt_text=INTAKE_RETRY_TEXT)
+            return
+        if looks_like_intake:
             clear_intake_pending(user_id)
             display_name = get_user_name(user_id, configuration)
-            save_intake_data(user_id, birth_date, question)
+            save_intake_data(user_id, name, birth_date, question)
             reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
             notify_admin_flex(
                 user_id,
@@ -709,6 +790,10 @@ def handle_text_message(event: MessageEvent):
 
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
+
+        if intent == "intake_help":
+            _reply_intake_prompt(event)
+            return
 
         # 找小夏老師
         if intent == "human":
@@ -727,7 +812,7 @@ def handle_text_message(event: MessageEvent):
             birth_date = birth_m.group(1).strip() if birth_m else ""
             question = quest_m.group(1).strip() if quest_m else ""
             display_name = get_user_name(user_id, configuration)
-            save_intake_data(user_id, birth_date, question)
+            save_intake_data(user_id, name, birth_date, question)
             reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
             notify_admin_flex(
                 user_id,
@@ -823,18 +908,8 @@ def handle_text_message(event: MessageEvent):
                 # 標記等待填寫諮詢資料（24 小時有效）
                 set_intake_pending(user_id)
 
-                # 回覆客人
-                reply_text(
-                    event,
-                    f"預約申請已送出 ✓\n\n"
-                    f"📅 {date_label} {time_str}\n\n"
-                    f"小夏老師確認後會通知您，請稍候。\n\n"
-                    f"方便的話請按照以下格式，一次填寫諮詢資料：\n\n"
-                    f"1. 姓名\n"
-                    f"2. 出生年月日時\n"
-                    f"3. 想問的問題\n\n"
-                    f"⚠️ 請包含數字，一次傳送"
-                )
+                # 回覆客人：提供可點擊的填寫格式卡片
+                _reply_intake_prompt(event, date_label, time_str)
 
                 # 通知管理員
                 notify_admin(

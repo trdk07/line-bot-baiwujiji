@@ -12,6 +12,7 @@ TEXT_TITLE = "#7B3F2A"   # 卡片標題（赤褐）
 TEXT_WHITE = "#4A453C"   # 主內文
 TEXT_GREY = "#6E675E"    # 淡色說明
 DIVIDER = "#C8B8A8"      # 分隔線
+QR_IMAGE_SIZE = "full"  # 付款 QR Code 需維持最大尺寸，避免 LINE 端顯示過小
 ACCENT_RED = "#8B2020"   # 主按鈕 / 預約完成強調
 BG_HEADER = "#3D1F1F"    # 深棕 header
 
@@ -48,15 +49,17 @@ def _sep(margin: str = "md") -> dict:
 
 
 def _ornament_divider(margin: str = "lg") -> dict:
+    """建立左右對稱的置中裝飾分隔線，避免裝飾符號視覺上偏左或偏右。"""
     return {
         "type": "box",
         "layout": "horizontal",
         "spacing": "sm",
         "margin": margin,
+        "alignItems": "center",
         "contents": [
-            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
-            _make_text("✦", size="xs", color=GOLD, align="center") | {"flex": 0, "margin": "sm", "wrap": False},
-            {"type": "separator", "color": DIVIDER, "flex": 1, "gravity": "center"},
+            {"type": "separator", "color": DIVIDER, "flex": 1},
+            {"type": "text", "text": "✦", "size": "xs", "color": GOLD, "align": "center", "flex": 0, "wrap": False},
+            {"type": "separator", "color": DIVIDER, "flex": 1},
         ],
     }
 
@@ -443,6 +446,57 @@ def intake_card(display_name: str, name: str, birth_date: str, question: str) ->
     }
 
 
+
+def intake_prompt_card(
+    prompt_text: str,
+    template_text: str,
+    date_label: str = "",
+    time_str: str = "",
+    prefill_url: str = "",
+) -> dict:
+    """預約送出後，引導顧客用固定格式填寫諮詢資料。"""
+    button_action = (
+        {"type": "uri", "label": "填寫諮詢資料", "uri": prefill_url}
+        if prefill_url
+        else {"type": "message", "label": "填寫諮詢資料", "text": "填寫諮詢資料"}
+    )
+    details = []
+    if date_label and time_str:
+        details = [
+            _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
+            _sep(),
+        ]
+    return {
+        "type": "flex",
+        "altText": "預約申請已送出，請填寫諮詢資料",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("預約申請已送出 ✓", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
+                    *details,
+                    _make_text(prompt_text, color=TEXT_WHITE),
+                    _make_text("請依照這個格式一次填寫：", size="sm", color=TEXT_GREY),
+                    _make_text(template_text, color=GOLD),
+                    {
+                        "type": "button",
+                        "action": button_action,
+                        "style": "primary",
+                        "color": ACCENT_RED,
+                        "height": "sm",
+                    },
+                    _make_text("送出前請把範例文字改成您的資料。", size="xxs", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
 def booking_card() -> dict:
     return {
         "type": "flex",
@@ -672,7 +726,7 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
             {
                 "type": "image",
                 "url": qr_image_url,
-                "size": "full",
+                "size": QR_IMAGE_SIZE,
                 "aspectMode": "fit",
                 "aspectRatio": "1:1",
                 "margin": "md",
