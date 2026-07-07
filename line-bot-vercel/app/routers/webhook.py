@@ -62,7 +62,12 @@ from app.services.calendar_service import (
     update_event,
     format_date_label,
 )
-from app.services.crm_service import find_customer_by_line_id, sync_booking_to_crm, parse_birth_date
+from app.services.crm_service import (
+    NOTION_PREVIEW_TIMEOUT,
+    find_customer_by_line_id,
+    sync_booking_to_crm,
+    parse_birth_date,
+)
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -493,8 +498,11 @@ def _cmd_booking_paid(event, user_id, text):
             "t": booking["t"],
         }
         if enqueue_crm(payload):
-            existing = find_customer_by_line_id(ctx_user)
-            customer_label = "老客戶" if existing else "新客戶"
+            existing = find_customer_by_line_id(ctx_user, timeout=NOTION_PREVIEW_TIMEOUT)
+            if existing.failed:
+                customer_label = "（無法判定）"
+            else:
+                customer_label = "老客戶" if existing.found else "新客戶"
             notify_admin_flex(ctx_user, fm.crm_preview_card(payload, customer_label), prefix_text="CRM 資料待確認")
 
     if cal_ok:
