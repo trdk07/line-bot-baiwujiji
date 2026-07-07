@@ -445,6 +445,57 @@ def intake_card(display_name: str, name: str, birth_date: str, question: str) ->
     }
 
 
+
+def intake_prompt_card(
+    prompt_text: str,
+    template_text: str,
+    date_label: str = "",
+    time_str: str = "",
+    prefill_url: str = "",
+) -> dict:
+    """預約送出後，引導顧客用固定格式填寫諮詢資料。"""
+    button_action = (
+        {"type": "uri", "label": "填寫諮詢資料", "uri": prefill_url}
+        if prefill_url
+        else {"type": "message", "label": "填寫諮詢資料", "text": "填寫諮詢資料"}
+    )
+    details = []
+    if date_label and time_str:
+        details = [
+            _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
+            _sep(),
+        ]
+    return {
+        "type": "flex",
+        "altText": "預約申請已送出，請填寫諮詢資料",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text("預約申請已送出 ✓", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
+                    *details,
+                    _make_text(prompt_text, color=TEXT_WHITE),
+                    _make_text("請依照這個格式一次填寫：", size="sm", color=TEXT_GREY),
+                    _make_text(template_text, color=GOLD),
+                    {
+                        "type": "button",
+                        "action": button_action,
+                        "style": "primary",
+                        "color": ACCENT_RED,
+                        "height": "sm",
+                    },
+                    _make_text("送出前請把範例文字改成您的資料。", size="xxs", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
 def booking_card() -> dict:
     return {
         "type": "flex",

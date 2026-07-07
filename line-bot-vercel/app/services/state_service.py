@@ -291,22 +291,22 @@ def get_message_context(user_id: str) -> tuple:
 INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
 
 
-def save_intake_data(user_id: str, birth_date: str, question: str):
-    """儲存諮詢資料（出生年月日、問題），30 天有效。"""
-    data = json.dumps({"b": birth_date, "q": question}, ensure_ascii=False)
+def save_intake_data(user_id: str, name: str = "", birth_date: str = "", question: str = ""):
+    """儲存諮詢資料（姓名、出生年月日、問題），30 天有效。"""
+    data = json.dumps({"n": name, "b": birth_date, "q": question}, ensure_ascii=False)
     kv_cmd("SET", f"intake_data:{user_id}", data, "EX", INTAKE_DATA_TTL)
 
 
 def get_intake_data(user_id: str) -> tuple:
-    """取得諮詢資料，回傳 (birth_date, question)。找不到回傳 ("", "")。"""
+    """取得諮詢資料，回傳 (name, birth_date, question)。找不到回傳 ("", "", "")。"""
     raw = kv_get(f"intake_data:{user_id}")
     if raw:
         try:
             data = json.loads(raw)
-            return data.get("b", ""), data.get("q", "")
+            return data.get("n", ""), data.get("b", ""), data.get("q", "")
         except (json.JSONDecodeError, TypeError):
             pass
-    return "", ""
+    return "", "", ""
 
 
 def clear_intake_data(user_id: str):
@@ -321,6 +321,14 @@ def save_done_booking(ref: str, booking: dict, cal_event_id: str):
     _pipeline([
         ["SET", f"done:{ref}", data, "EX", DONE_TTL],
         ["RPUSH", "done_queue", ref],
+    ])
+
+
+def delete_done_booking(ref: str):
+    """刪除已完成預約紀錄並從 done 佇列移除。"""
+    _pipeline([
+        ["DEL", f"done:{ref}"],
+        ["LREM", "done_queue", 0, ref],
     ])
 
 

@@ -154,13 +154,17 @@ def test_full_booking_lifecycle(line_env):
 
     # 選擇日期+時段 → 建立 pending 預約，通知管理員
     wh.handle_text_message(_mk_event("預約 2026-07-12 15:00", user_id="cust1"))
-    assert "預約申請已送出" in line_env.replies[-1][0]
+    assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
     assert line_env.pushes[-1][0] == "admin1"
     assert "📅 預約申請" in line_env.pushes[-1][1][0]
 
     # 管理員 /ok → 發匯款資訊
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
     assert "匯款資訊已發送給客人" in line_env.replies[-1][0]
+
+    # 管理員 /ok 後仍可補填諮詢資料
+    wh.handle_text_message(_mk_event("姓名：王小明 出生年月日時：1990-01-01 08:00 問題：想問工作", user_id="cust1"))
+    assert "已收到您的諮詢資料" in line_env.replies[-1][0]
 
     # 客人回報已匯款
     wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
@@ -264,6 +268,7 @@ def test_intake_pending_captures_full_name_and_birth(line_env):
     wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01\n3. 想問工作", user_id="cust1"))
     assert "已收到您的諮詢資料" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "admin1"
+    assert "王小明" in line_env.kv.store["intake_data:cust1"]
 
 
 def test_intake_pending_does_not_swallow_other_intent(line_env):
