@@ -186,9 +186,9 @@
     .booking-row { border-top: 1px solid var(--line); padding: 12px 0; }
     .booking-row:first-of-type { border-top: 0; }
     .booking-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
-    .booking-form { display: grid; grid-template-columns: 1fr 92px 72px 72px; gap: 8px; margin-top: 8px; }
-    .booking-form input, .booking-form button { border: 1px solid var(--line); border-radius: 8px; padding: 9px 8px; font: inherit; }
-    .booking-form button { border: 0; background: var(--accent); color: #fff; font-weight: 700; }
+    .booking-form { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 6px; margin-top: 8px; }
+    .booking-form input, .booking-form button { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; font: inherit; }
+    .booking-form button { border: 0; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
     .booking-form .delete { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
     .toast.show { opacity: 1; }
   </style>

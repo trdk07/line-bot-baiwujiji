@@ -29,6 +29,7 @@ POSITIVE_CASES = [
     ("/booking-admin", "booking_admin"),
     ("設定時段", "booking_admin"),
     ("/myid", "get_my_id"),
+    ("填寫諮詢資料", "intake_help"),
 
     # --- 諮詢資料後備格式 ---
     ("①王小明②1990-01-01③想問感情", "intake_form"),
