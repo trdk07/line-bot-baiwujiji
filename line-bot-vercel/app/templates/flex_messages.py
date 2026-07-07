@@ -725,10 +725,11 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
             {
                 "type": "image",
                 "url": qr_image_url,
-                "size": "full",
+                "size": "xl",
                 "aspectMode": "fit",
                 "aspectRatio": "1:1",
                 "margin": "md",
+                "align": "center",
             },
             _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
         ]

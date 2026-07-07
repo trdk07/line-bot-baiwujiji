@@ -16,6 +16,7 @@ LINE Webhook 路由 — 預約 + 付款確認三步機制。
 
 import re
 import logging
+from urllib.parse import quote
 from fastapi import APIRouter, Request, HTTPException
 
 from linebot.v3 import WebhookHandler
