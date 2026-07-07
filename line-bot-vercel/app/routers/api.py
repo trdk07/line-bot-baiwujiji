@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services.payment_qr import QR_IMAGE_PATH, resolve_payment_qr_url, self_hosted_qr_url
 from app.services.calendar_service import TW_TZ, delete_event, format_date_label, update_event
 from app.services.notify_service import push_text_to_user, push_flex_to_user
 from app.services.slots_service import SELECTABLE_TIMES, get_open_slots, set_open_slots
@@ -71,6 +72,22 @@ async def booking_page():
     html = Path(__file__).resolve().parents[1].joinpath("templates", "booking.html").read_text(encoding="utf-8")
     html = html.replace("__BOT_BASIC_ID__", json.dumps(settings.bot_basic_id))
     return HTMLResponse(html)
+
+
+@router.get("/qr-payment.png")
+async def payment_qr_image():
+    """伺服付款 QR Code 圖檔。
+
+    vercel.json 把所有路徑 rewrite 到 FastAPI，repo 裡的靜態圖檔不會被
+    Vercel 直接伺服，必須由 app 自己回傳，LINE 才抓得到 image/png。
+    """
+    if not QR_IMAGE_PATH.is_file():
+        raise HTTPException(status_code=404, detail="qr image not found")
+    return Response(
+        content=QR_IMAGE_PATH.read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/api/slots")
@@ -221,24 +238,27 @@ async def debug_qr(token: str = ""):
     settings = get_settings()
     raw = settings.payment_qr_image_url or ""
     normalized = fm.normalize_image_url(raw)
+    resolved = resolve_payment_qr_url()
     result = {
         "set": bool(raw.strip()),
         "raw": raw,
         "normalized": normalized,
+        "self_hosted_fallback": self_hosted_qr_url(),
+        "resolved": resolved,
         "https": raw.strip().lower().startswith("https://"),
-        "usable_by_line": bool(normalized),
+        "usable_by_line": bool(resolved),
     }
-    if not normalized:
+    if not resolved:
         result["note"] = (
-            "URL 未設定或非 https，LINE 無法顯示。"
-            "請在 Vercel 設定 PAYMENT_QR_IMAGE_URL 為 https 開頭的圖檔直連。"
+            "PAYMENT_QR_IMAGE_URL 未設定（或非 https），且 PUBLIC_BASE_URL 未設定，"
+            "無法退回 app 自帶的 /qr-payment.png。兩者擇一設定即可。"
         )
         return result
 
     try:
         import httpx
 
-        r = httpx.get(normalized, timeout=10.0, follow_redirects=True)
+        r = httpx.get(resolved, timeout=10.0, follow_redirects=True)
         content_type = r.headers.get("content-type", "")
         result.update({
             "reachable": True,
