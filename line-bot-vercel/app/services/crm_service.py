@@ -51,7 +51,7 @@ def _post(path: str, payload: dict) -> dict | None:
     try:
         r = httpx.post(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=10.0)
         if r.status_code >= 300:
-            logger.error("Notion POST %s failed: HTTP %d", path, r.status_code)
+            logger.error("Notion POST %s failed: HTTP %d body=%s", path, r.status_code, r.text)
             return None
         return r.json()
     except Exception as e:
@@ -66,7 +66,7 @@ def _patch(path: str, payload: dict) -> bool:
     try:
         r = httpx.patch(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=10.0)
         if r.status_code >= 300:
-            logger.error("Notion PATCH %s failed: HTTP %d", path, r.status_code)
+            logger.error("Notion PATCH %s failed: HTTP %d body=%s", path, r.status_code, r.text)
             return False
         return True
     except Exception as e:

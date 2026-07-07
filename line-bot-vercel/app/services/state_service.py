@@ -291,6 +291,48 @@ def get_message_context(user_id: str) -> tuple:
 INTAKE_DATA_TTL = 30 * 24 * 60 * 60  # 30 天（秒）
 
 
+
+def set_intake_step(user_id: str, step: str):
+    """設定諮詢資料逐步填寫步驟：name / birth / question。"""
+    kv_cmd("SET", f"intake_step:{user_id}", step, "EX", INTAKE_PENDING_TTL)
+
+
+def get_intake_step(user_id: str) -> str:
+    """取得目前諮詢資料填寫步驟。"""
+    return kv_get(f"intake_step:{user_id}") or ""
+
+
+def clear_intake_step(user_id: str):
+    """清除諮詢資料填寫步驟。"""
+    kv_cmd("DEL", f"intake_step:{user_id}")
+
+
+def save_intake_draft(user_id: str, **fields):
+    """暫存逐步填寫中的諮詢資料。"""
+    raw = kv_get(f"intake_draft:{user_id}")
+    try:
+        data = json.loads(raw) if raw else {}
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    data.update({k: v for k, v in fields.items() if v is not None})
+    kv_cmd("SET", f"intake_draft:{user_id}", json.dumps(data, ensure_ascii=False), "EX", INTAKE_PENDING_TTL)
+
+
+def get_intake_draft(user_id: str) -> dict:
+    """取得逐步填寫中的諮詢資料。"""
+    raw = kv_get(f"intake_draft:{user_id}")
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def clear_intake_draft(user_id: str):
+    """清除逐步填寫暫存資料。"""
+    kv_cmd("DEL", f"intake_draft:{user_id}")
+
 def save_intake_data(user_id: str, name: str = "", birth_date: str = "", question: str = ""):
     """儲存諮詢資料（姓名、出生年月日、問題），30 天有效。"""
     data = json.dumps({"n": name, "b": birth_date, "q": question}, ensure_ascii=False)

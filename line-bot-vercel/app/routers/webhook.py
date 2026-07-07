@@ -49,6 +49,8 @@ from app.services.state_service import (
     save_done_booking, get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
     set_intake_pending, clear_intake_pending,
+    set_intake_step, get_intake_step, clear_intake_step,
+    save_intake_draft, get_intake_draft, clear_intake_draft,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
     enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
@@ -271,6 +273,34 @@ def _is_placeholder_intake(name: str, birth_date: str, question: str) -> bool:
     return any(value in INTAKE_PLACEHOLDERS for value in values if value)
 
 
+def _looks_like_placeholder_message(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    return bool(re.search(r"1[.\-、．]?姓名", compact) and re.search(r"2[.\-、．]?出生年月日時", compact) and re.search(r"3[.\-、．]?想問的問題", compact))
+
+
+def _reply_intake_step_prompt(event, step: str, date_label: str = "", time_str: str = ""):
+    if step == "name":
+        prefix = "預約申請已送出 ✓\n"
+        if date_label and time_str:
+            prefix += f"📅 {date_label} {time_str}\n"
+        reply_text(
+            event,
+            prefix + "\n小夏老師確認後會通知您。\n\n為了讓老師準備，請直接回覆您的姓名。",
+        )
+        return
+    if step == "birth":
+        reply_text(event, "收到姓名 ✓\n\n請直接回覆出生年月日時。\n例如：1990-01-01 08:00")
+        return
+    if step == "question":
+        reply_text(event, "收到出生年月日時 ✓\n\n請直接回覆想問的問題。")
+        return
+
+def _intake_prefill_url() -> str:
+    if not settings.bot_basic_id:
+        return ""
+    return f"https://line.me/R/oaMessage/{settings.bot_basic_id}/?{quote(INTAKE_TEMPLATE_TEXT)}"
+
+
 def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt_text: str = INTAKE_PROMPT_TEXT):
     reply_flex(
         event,
@@ -279,6 +309,7 @@ def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt
             INTAKE_TEMPLATE_TEXT,
             date_label=date_label,
             time_str=time_str,
+            prefill_url=_intake_prefill_url(),
         ),
     )
 
@@ -416,6 +447,8 @@ def _cmd_booking_paid(event, user_id, text):
     customer_name = intake_name or booking["n"]
     clear_intake_data(ctx_user)
     clear_intake_pending(ctx_user)
+    clear_intake_step(ctx_user)
+    clear_intake_draft(ctx_user)
 
     # 通知客人：預約確認卡片
     push_ok = push_flex_to_user(
@@ -772,13 +805,24 @@ def handle_text_message(event: MessageEvent):
     # 只有訊息不匹配任何關鍵字、或明顯是完整的姓名+生日格式時，才當成諮詢資料，
     # 避免客人預約後又輸入「我要預約」「服務項目」等其他意圖被誤吞。
     if not is_admin(user_id) and intake_pending:
+        if intent == "intake_help":
+            set_intake_step(user_id, "name")
+            _reply_intake_step_prompt(event, "name")
+            return
+
+        if _looks_like_placeholder_message(user_text):
+            _reply_intake_step_prompt(event, get_intake_step(user_id) or "name")
+            return
+
         name, birth_date, question = _parse_intake_text(user_text)
         looks_like_intake = bool(name and birth_date)
-        if _is_placeholder_intake(name, birth_date, question) or (intent is None and not looks_like_intake):
-            _reply_intake_prompt(event, prompt_text=INTAKE_RETRY_TEXT)
+        if _is_placeholder_intake(name, birth_date, question):
+            _reply_intake_step_prompt(event, get_intake_step(user_id) or "name")
             return
         if looks_like_intake:
             clear_intake_pending(user_id)
+            clear_intake_step(user_id)
+            clear_intake_draft(user_id)
             display_name = get_user_name(user_id, configuration)
             save_intake_data(user_id, name, birth_date, question)
             reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
@@ -788,6 +832,38 @@ def handle_text_message(event: MessageEvent):
                 prefix_text="提供了諮詢資料",
             )
             return
+
+        if intent is None:
+            step = get_intake_step(user_id) or "name"
+            if step == "name":
+                save_intake_draft(user_id, n=user_text)
+                set_intake_step(user_id, "birth")
+                _reply_intake_step_prompt(event, "birth")
+                return
+            if step == "birth":
+                save_intake_draft(user_id, b=user_text)
+                set_intake_step(user_id, "question")
+                _reply_intake_step_prompt(event, "question")
+                return
+            if step == "question":
+                draft = get_intake_draft(user_id)
+                final_name = draft.get("n", "")
+                final_birth = draft.get("b", "")
+                final_question = user_text
+                clear_intake_pending(user_id)
+                clear_intake_step(user_id)
+                clear_intake_draft(user_id)
+                display_name = get_user_name(user_id, configuration)
+                save_intake_data(user_id, final_name, final_birth, final_question)
+                reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
+                notify_admin_flex(
+                    user_id,
+                    fm.intake_card(display_name, final_name, final_birth, final_question),
+                    prefix_text="提供了諮詢資料",
+                )
+                return
+
+        # 非諮詢資料意圖（例如服務項目）會交回一般關鍵字流程處理。
 
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
@@ -906,11 +982,13 @@ def handle_text_message(event: MessageEvent):
                 # 儲存預約（狀態：pending，等管理員確認日期）
                 save_booking(user_id, date_str, time_str, user_name)
 
-                # 標記等待填寫諮詢資料（24 小時有效）
+                # 標記等待填寫諮詢資料（24 小時有效），並改用逐步問答降低填錯機率
                 set_intake_pending(user_id)
+                clear_intake_draft(user_id)
+                set_intake_step(user_id, "name")
 
-                # 回覆客人：提供可點擊的填寫格式卡片
-                _reply_intake_prompt(event, date_label, time_str)
+                # 回覆客人：逐步詢問姓名 → 出生年月日時 → 問題
+                _reply_intake_step_prompt(event, "name", date_label, time_str)
 
                 # 通知管理員
                 notify_admin(

@@ -154,7 +154,8 @@ def test_full_booking_lifecycle(line_env):
 
     # 選擇日期+時段 → 建立 pending 預約，通知管理員
     wh.handle_text_message(_mk_event("預約 2026-07-12 15:00", user_id="cust1"))
-    assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
+    # Stepwise intake should ask for the customer name while admin still receives booking request.
+    assert "請直接回覆您的姓名" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "admin1"
     assert "📅 預約申請" in line_env.pushes[-1][1][0]
 
@@ -278,7 +279,7 @@ def test_intake_pending_rejects_placeholder_template_and_keeps_waiting(line_env)
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("1. 姓名\n2. 出生年月日時\n3. 想問的問題", user_id="cust1"))
-    assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
+    assert "請直接回覆您的姓名" in line_env.replies[-1][0]
     assert "intake_data:cust1" not in line_env.kv.store
     assert line_env.kv.store["intake_pending:cust1"] == "1"
 
@@ -293,7 +294,7 @@ def test_intake_pending_rejects_incomplete_free_text_and_keeps_waiting(line_env)
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("王小明 1990-01-01 想問工作", user_id="cust1"))
-    assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
+    assert "請直接回覆出生年月日時" in line_env.replies[-1][0]
     assert "intake_data:cust1" not in line_env.kv.store
     assert line_env.kv.store["intake_pending:cust1"] == "1"
 
