@@ -734,12 +734,14 @@ def normalize_image_url(url: str) -> str:
         # 非 https（含純 http）LINE 一律無法顯示，直接視為未設定
         return ""
 
-    # Google Drive：/file/d/<id>/view 或 open?id=<id> → 直連
+    # Google Drive：/file/d/<id>/view 或 open?id=<id> → 直連。
+    # 注意不能用舊的 uc?export=view（Google 已廢棄，回傳 HTML），
+    # 要走 lh3.googleusercontent.com 才會回傳真正的圖檔。
     m = re.search(r"drive\.google\.com/file/d/([^/]+)", url)
     if not m:
         m = re.search(r"drive\.google\.com/(?:open|uc)\?(?:[^#]*&)?id=([^&]+)", url)
     if m:
-        return f"https://drive.google.com/uc?export=view&id={m.group(1)}"
+        return f"https://lh3.googleusercontent.com/d/{m.group(1)}"
 
     # Dropbox：分享連結的 dl=0 會回傳網頁，改成 raw=1 才是圖檔
     if "dropbox.com" in url:

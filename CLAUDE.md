@@ -94,7 +94,7 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `ADMIN_LINE_USER_ID` | | 管理員 LINE User ID |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | | Vercel KV（不設定則所有狀態退化為預設值，Bot 仍可運作但無記憶） |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_CALENDAR_ID` | | Google Calendar 整合（不設定則走 `booking_card()` 純文字填寫流程） |
-| `PAYMENT_QR_IMAGE_URL` | | 匯款 QR Code 圖片網址 |
+| `PAYMENT_QR_IMAGE_URL` | | 匯款 QR Code 圖片網址（未設定或無效時，自動退回 app 自帶的 `app/static/qr-payment.png`，由 `/qr-payment.png` 路由伺服，需搭配 `PUBLIC_BASE_URL`） |
 
 本地開發用 `.env` 檔（`line-bot-vercel/.env`，已在 `.gitignore`）；
 Vercel 上在後台環境變數設定，不用 `.env`。

@@ -161,6 +161,20 @@ def test_ok_continues_when_payment_qr_url_missing(line_env, monkeypatch):
     assert "awaiting_payment" in line_env.kv.store[next(iter(k for k in line_env.kv.store if k.startswith("booking:")))]
 
 
+def test_ok_falls_back_to_self_hosted_qr_image(line_env, monkeypatch):
+    """PAYMENT_QR_IMAGE_URL 未設定時，匯款卡片改用 app 自己伺服的 /qr-payment.png。"""
+    monkeypatch.setattr(wh.settings, "payment_qr_image_url", "")
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://bot.example.com")
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+
+    line_env.raw_pushes.clear()
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+
+    flex = line_env.raw_pushes[-1].messages[0]
+    assert "https://bot.example.com/qr-payment.png" in str(flex.contents.to_dict())
+
+
 def test_full_booking_lifecycle(line_env):
     _seed_open_slots(line_env)
     # 第一次「我要預約」→ 原則說明卡片

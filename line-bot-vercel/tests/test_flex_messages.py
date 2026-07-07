@@ -131,15 +131,22 @@ def test_payment_info_card_falls_back_when_url_not_https():
 
 
 def test_normalize_image_url_google_drive_view_link():
+    # uc?export=view 已被 Google 廢棄（回傳 HTML），必須改寫成 lh3 直連
     assert fm.normalize_image_url(
         "https://drive.google.com/file/d/ABC123xyz/view?usp=sharing"
-    ) == "https://drive.google.com/uc?export=view&id=ABC123xyz"
+    ) == "https://lh3.googleusercontent.com/d/ABC123xyz"
 
 
 def test_normalize_image_url_google_drive_open_link():
     assert fm.normalize_image_url(
         "https://drive.google.com/open?id=ABC123xyz"
-    ) == "https://drive.google.com/uc?export=view&id=ABC123xyz"
+    ) == "https://lh3.googleusercontent.com/d/ABC123xyz"
+
+
+def test_normalize_image_url_google_drive_legacy_uc_link():
+    assert fm.normalize_image_url(
+        "https://drive.google.com/uc?export=view&id=ABC123xyz"
+    ) == "https://lh3.googleusercontent.com/d/ABC123xyz"
 
 
 def test_normalize_image_url_dropbox_dl_to_raw():

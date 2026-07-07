@@ -61,6 +61,7 @@ from app.services.calendar_service import (
     update_event,
     format_date_label,
 )
+from app.services.payment_qr import resolve_payment_qr_url
 from app.services.crm_service import (
     NOTION_PREVIEW_TIMEOUT,
     find_customer_by_line_id,
@@ -400,7 +401,7 @@ def _cmd_booking_ok(event, user_id, text):
         fm.payment_info_card(
             date_label,
             booking["t"],
-            settings.payment_qr_image_url,
+            resolve_payment_qr_url(),
         ),
     )
 
