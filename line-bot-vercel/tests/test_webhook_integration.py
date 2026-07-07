@@ -102,15 +102,17 @@ def line_env(monkeypatch):
     """設定 admin id + KV，並攔截 LINE Messaging API 呼叫。"""
     monkeypatch.setattr(wh.settings, "admin_line_user_id", "admin1")
     monkeypatch.setattr(wh.settings, "kv_rest_api_url", "http://fake-kv")
+    monkeypatch.setattr(wh.settings, "payment_qr_image_url", "https://example.com/qr.png")
 
     kv = FakeKV()
-    replies, pushes, raw_replies = [], [], []
+    replies, pushes, raw_replies, raw_pushes = [], [], [], []
 
     def fake_reply(self, req):
         raw_replies.append(req)
         replies.append(_extract(req))
 
     def fake_push(self, req):
+        raw_pushes.append(req)
         pushes.append((req.to, _extract(req)))
 
     def fake_profile(self, user_id):
@@ -120,7 +122,7 @@ def line_env(monkeypatch):
          patch.object(messaging.MessagingApi, "push_message", fake_push), \
          patch.object(messaging.MessagingApi, "get_profile", fake_profile), \
          patch("httpx.post", kv.post):
-        yield SimpleNamespace(replies=replies, pushes=pushes, raw_replies=raw_replies, kv=kv)
+        yield SimpleNamespace(replies=replies, pushes=pushes, raw_replies=raw_replies, raw_pushes=raw_pushes, kv=kv)
 
 
 def test_non_admin_cannot_use_admin_commands(line_env):
@@ -143,6 +145,20 @@ def test_myid_available_to_non_admin(line_env):
 def test_ok_with_no_pending_bookings(line_env):
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
     assert line_env.replies[-1] == ["目前沒有待確認日期的預約。"]
+
+
+def test_ok_requires_https_payment_qr_url(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "payment_qr_image_url", "")
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+
+    line_env.replies.clear()
+    line_env.pushes.clear()
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+
+    assert "PAYMENT_QR_IMAGE_URL" in line_env.replies[-1][0]
+    assert line_env.pushes == []
+    assert "awaiting_payment" not in line_env.kv.store[next(iter(k for k in line_env.kv.store if k.startswith("booking:")))]
 
 
 def test_full_booking_lifecycle(line_env):
@@ -276,7 +292,6 @@ def test_intake_pending_captures_full_name_and_birth(line_env):
     assert "王小明" in line_env.kv.store["intake_data:cust1"]
 
 
-
 def test_intake_pending_rejects_placeholder_template_and_keeps_waiting(line_env):
     _seed_open_slots(line_env)
     wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
@@ -357,6 +372,25 @@ def test_pending_stepwise_birth_multiline_and_keyword_question(line_env):
     data = json.loads(line_env.kv.store["intake_data:cust1"])
     assert data == {"n": "王小明", "b": "1990年5月15日\n早上八點", "q": "想問感情和財運"}
     assert "已收到您的諮詢資料" in line_env.replies[-1][0]
+
+
+def test_paid_confirmation_card_uses_line_display_name_not_intake_name(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01 08:00\n3. 想問感情", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+
+    line_env.raw_pushes.clear()
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    customer_push = line_env.raw_pushes[0]
+    flex_json = customer_push.messages[0].contents.to_dict()
+    card_text = json.dumps(flex_json, ensure_ascii=False)
+    assert "User-cust1" in card_text
+    assert "王小明" not in card_text
+    assert "1990-01-01 08:00" in card_text
+    assert "想問感情" in card_text
 
 
 def test_pending_escape_payment_and_human(line_env):

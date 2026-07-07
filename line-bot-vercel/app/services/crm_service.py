@@ -16,6 +16,31 @@ logger = logging.getLogger(__name__)
 CUSTOMER_DS = "1c250abc-cc15-8103-aa87-000bad27de6f"
 COMM_DS = "1c250abc-cc15-810a-8561-000b682503ff"
 NOTION_VERSION = "2025-09-03"
+NOTION_DEFAULT_TIMEOUT = 10.0
+NOTION_PREVIEW_TIMEOUT = 4.0
+
+
+@dataclass(frozen=True)
+class CustomerLookup:
+    status: str  # found / not_found / error
+    customer: dict | None = None
+    error: str = ""
+
+    @property
+    def found(self) -> bool:
+        return self.status == "found"
+
+    @property
+    def not_found(self) -> bool:
+        return self.status == "not_found"
+
+    @property
+    def failed(self) -> bool:
+        return self.status == "error"
+
+
+class NotionAPIError(Exception):
+    pass
 
 # 最近一次 Notion API 失敗原因，讓 /crm ok 的回覆能帶出實際錯誤
 _last_error = ""
@@ -65,17 +90,34 @@ def _headers() -> dict | None:
     }
 
 
-def _post(path: str, payload: dict) -> dict | None:
+def _notion_error_message(response: httpx.Response) -> str:
+    message = ""
+    try:
+        body = response.json()
+        message = body.get("message") or body.get("code") or ""
+    except Exception:
+        message = response.text or ""
+    text = f"HTTP {response.status_code}"
+    if message:
+        text += f" — {message}"
+    if response.status_code == 404:
+        text += "；請確認資料庫已 share 給 integration"
+    return text
+
+
+def _post(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> dict:
     headers = _headers()
     if not headers:
-        return None
+        raise NotionAPIError("NOTION_API_KEY 未設定")
     try:
-        r = httpx.post(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=10.0)
+        r = httpx.post(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=timeout)
         if r.status_code >= 300:
             logger.error("Notion POST %s failed: HTTP %d body=%s", path, r.status_code, r.text)
             _record_error(r.status_code, r.text)
             return None
         return r.json()
+    except NotionAPIError:
+        raise
     except Exception as e:
         logger.error("Notion POST %s error: %s", path, e)
         global _last_error
@@ -83,17 +125,19 @@ def _post(path: str, payload: dict) -> dict | None:
         return None
 
 
-def _patch(path: str, payload: dict) -> bool:
+def _patch(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> bool:
     headers = _headers()
     if not headers:
-        return False
+        raise NotionAPIError("NOTION_API_KEY 未設定")
     try:
-        r = httpx.patch(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=10.0)
+        r = httpx.patch(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=timeout)
         if r.status_code >= 300:
             logger.error("Notion PATCH %s failed: HTTP %d body=%s", path, r.status_code, r.text)
             _record_error(r.status_code, r.text)
             return False
         return True
+    except NotionAPIError:
+        raise
     except Exception as e:
         logger.error("Notion PATCH %s error: %s", path, e)
         global _last_error
@@ -113,10 +157,14 @@ def _date(value: str | None) -> dict:
     return {"date": {"start": value}} if value else {"date": None}
 
 
-def find_customer_by_line_id(user_id: str) -> dict | None:
+def find_customer_by_line_id(user_id: str, timeout: float = NOTION_DEFAULT_TIMEOUT) -> CustomerLookup:
     payload = {"filter": {"property": "LINE", "rich_text": {"equals": user_id}}, "page_size": 1}
-    data = _post(f"data_sources/{CUSTOMER_DS}/query", payload)
-    return (data.get("results") or [None])[0] if data else None
+    try:
+        data = _post(f"data_sources/{CUSTOMER_DS}/query", payload, timeout=timeout)
+    except NotionAPIError as e:
+        return CustomerLookup("error", error=str(e))
+    customer = (data.get("results") or [None])[0]
+    return CustomerLookup("found", customer=customer) if customer else CustomerLookup("not_found")
 
 
 def create_customer(payload: dict) -> str | None:
@@ -125,7 +173,7 @@ def create_customer(payload: dict) -> str | None:
     if birth:
         props["阳历"] = _date(birth)
     data = _post("pages", {"parent": {"data_source_id": CUSTOMER_DS}, "properties": props})
-    return data.get("id") if data else None
+    return data.get("id")
 
 
 def update_customer_status(page_id: str, status: str) -> bool:
