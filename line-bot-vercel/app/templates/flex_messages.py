@@ -3,6 +3,7 @@ LINE Flex Message 模板 — 所有互動卡片的定義。
 這些全部是固定內容，不花 AI Token。
 """
 
+import re
 from datetime import datetime
 
 # === 色彩定義 ===
@@ -718,8 +719,41 @@ def crm_preview_card(payload: dict, customer_label: str) -> dict:
 # ============================================================
 # 匯款資訊卡片（管理員確認日期後發送給客人）
 # ============================================================
+def normalize_image_url(url: str) -> str:
+    """把常見的「分享頁」網址轉成 LINE 能直接載入的圖檔直連。
+
+    LINE Flex 的 image.url 必須是 https 且回傳真正的圖片（image/png、image/jpeg）。
+    使用者最常見的錯誤是把 Google Drive／Dropbox 的「檢視分享頁」網址貼進來，
+    那些網址回傳的是 HTML 網頁而不是圖檔，LINE 便顯示空白。這裡自動修正，
+    並把非 https 的網址視為無效（回傳空字串 → 卡片走「無法顯示」的後備文字）。
+    """
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if not url.lower().startswith("https://"):
+        # 非 https（含純 http）LINE 一律無法顯示，直接視為未設定
+        return ""
+
+    # Google Drive：/file/d/<id>/view 或 open?id=<id> → 直連
+    m = re.search(r"drive\.google\.com/file/d/([^/]+)", url)
+    if not m:
+        m = re.search(r"drive\.google\.com/(?:open|uc)\?(?:[^#]*&)?id=([^&]+)", url)
+    if m:
+        return f"https://drive.google.com/uc?export=view&id={m.group(1)}"
+
+    # Dropbox：分享連結的 dl=0 會回傳網頁，改成 raw=1 才是圖檔
+    if "dropbox.com" in url:
+        if "raw=1" not in url:
+            url = re.sub(r"[?&]dl=\d", "", url)
+            url += ("&" if "?" in url else "?") + "raw=1"
+        return url
+
+    return url
+
+
 def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict:
     """顯示匯款 QR Code，讓客人掃碼完成匯款。"""
+    qr_image_url = normalize_image_url(qr_image_url)
     qr_section = []
     if qr_image_url:
         qr_section = [

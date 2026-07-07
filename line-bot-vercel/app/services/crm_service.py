@@ -2,9 +2,10 @@
 半自動 Notion CRM 同步。
 """
 
-from dataclasses import dataclass
+import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date
 
 import httpx
@@ -42,6 +43,26 @@ class CustomerLookup:
 class NotionAPIError(Exception):
     pass
 
+# 最近一次 Notion API 失敗原因，讓 /crm ok 的回覆能帶出實際錯誤
+_last_error = ""
+
+
+def _record_error(status_code: int, body_text: str):
+    global _last_error
+    try:
+        data = json.loads(body_text)
+        detail = f"{data.get('code', '')} {data.get('message', '')}".strip()
+    except (json.JSONDecodeError, TypeError):
+        detail = body_text[:200]
+    hint = ""
+    if status_code == 404:
+        hint = "；請確認 Notion 資料庫已在「⋯ → 連接」加入這支 integration"
+    _last_error = f"HTTP {status_code} {detail}{hint}"
+
+
+def get_last_error() -> str:
+    return _last_error
+
 
 def parse_birth_date(text: str) -> str | None:
     if not text:
@@ -70,21 +91,6 @@ def _headers() -> dict | None:
     }
 
 
-def _notion_error_message(response: httpx.Response) -> str:
-    message = ""
-    try:
-        body = response.json()
-        message = body.get("message") or body.get("code") or ""
-    except Exception:
-        message = response.text or ""
-    text = f"HTTP {response.status_code}"
-    if message:
-        text += f" — {message}"
-    if response.status_code == 404:
-        text += "；請確認資料庫已 share 給 integration"
-    return text
-
-
 def _post(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> dict:
     headers = _headers()
     if not headers:
@@ -92,15 +98,17 @@ def _post(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> 
     try:
         r = httpx.post(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=timeout)
         if r.status_code >= 300:
-            msg = _notion_error_message(r)
-            logger.error("Notion POST %s failed: %s body=%s", path, msg, r.text)
-            raise NotionAPIError(msg)
+            logger.error("Notion POST %s failed: HTTP %d body=%s", path, r.status_code, r.text)
+            _record_error(r.status_code, r.text)
+            return None
         return r.json()
     except NotionAPIError:
         raise
     except Exception as e:
         logger.error("Notion POST %s error: %s", path, e)
-        raise NotionAPIError(str(e)) from e
+        global _last_error
+        _last_error = str(e)
+        return None
 
 
 def _patch(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> bool:
@@ -110,15 +118,17 @@ def _patch(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) ->
     try:
         r = httpx.patch(f"https://api.notion.com/v1/{path}", headers=headers, json=payload, timeout=timeout)
         if r.status_code >= 300:
-            msg = _notion_error_message(r)
-            logger.error("Notion PATCH %s failed: %s body=%s", path, msg, r.text)
-            raise NotionAPIError(msg)
+            logger.error("Notion PATCH %s failed: HTTP %d body=%s", path, r.status_code, r.text)
+            _record_error(r.status_code, r.text)
+            return False
         return True
     except NotionAPIError:
         raise
     except Exception as e:
         logger.error("Notion PATCH %s error: %s", path, e)
-        raise NotionAPIError(str(e)) from e
+        global _last_error
+        _last_error = str(e)
+        return False
 
 
 def _title(text: str) -> dict:
@@ -139,6 +149,9 @@ def find_customer_by_line_id(user_id: str, timeout: float = NOTION_DEFAULT_TIMEO
         data = _post(f"data_sources/{CUSTOMER_DS}/query", payload, timeout=timeout)
     except NotionAPIError as e:
         return CustomerLookup("error", error=str(e))
+    if data is None:
+        # _post 已記錄 HTTP 錯誤（例如 404 資料庫未分享），視為查詢失敗
+        return CustomerLookup("error", error=get_last_error())
     customer = (data.get("results") or [None])[0]
     return CustomerLookup("found", customer=customer) if customer else CustomerLookup("not_found")
 
@@ -149,7 +162,7 @@ def create_customer(payload: dict) -> str | None:
     if birth:
         props["阳历"] = _date(birth)
     data = _post("pages", {"parent": {"data_source_id": CUSTOMER_DS}, "properties": props})
-    return data.get("id")
+    return data.get("id") if data else None
 
 
 def update_customer_status(page_id: str, status: str) -> bool:
@@ -168,20 +181,25 @@ def create_comm_record(payload: dict, customer_page_id: str) -> bool:
     return bool(_post("pages", {"parent": {"data_source_id": COMM_DS}, "properties": props}))
 
 
-def sync_booking_to_crm(pending: dict) -> tuple[bool, str]:
-    customer_lookup = find_customer_by_line_id(pending.get("u", ""))
-    if customer_lookup.failed:
-        return False, customer_lookup.error
+def _fail(reason: str) -> tuple[bool, str]:
+    detail = get_last_error()
+    return False, f"{reason}（{detail}）" if detail else reason
 
-    is_new = customer_lookup.not_found
-    try:
-        page_id = create_customer(pending) if is_new else (customer_lookup.customer or {}).get("id")
-        if not page_id:
-            return False, "客戶檔案建立/查詢失敗"
-        if not is_new and not update_customer_status(page_id, "服务中"):
-            return False, "客戶狀態更新失敗"
-        if not create_comm_record(pending, page_id):
-            return False, "溝通記錄建立失敗"
-    except NotionAPIError as e:
-        return False, str(e)
+
+def sync_booking_to_crm(pending: dict) -> tuple[bool, str]:
+    global _last_error
+    _last_error = ""
+    if not get_settings().notion_api_key:
+        return False, "NOTION_API_KEY 未設定"
+    lookup = find_customer_by_line_id(pending.get("u", ""))
+    if lookup.failed:
+        return False, f"客戶檔案查詢失敗（{lookup.error}）"
+    is_new = lookup.not_found
+    page_id = create_customer(pending) if is_new else lookup.customer.get("id")
+    if not page_id:
+        return _fail("客戶檔案建立/查詢失敗")
+    if not is_new and not update_customer_status(page_id, "服务中"):
+        return _fail("客戶狀態更新失敗")
+    if not create_comm_record(pending, page_id):
+        return _fail("溝通記錄建立失敗")
     return True, "新客戶建檔" if is_new else "老客戶補記錄"
