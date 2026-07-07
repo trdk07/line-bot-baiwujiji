@@ -122,6 +122,44 @@ def test_payment_info_card_uses_full_size_qr_image():
     assert image["aspectMode"] == "fit"
 
 
+def test_payment_info_card_falls_back_when_url_not_https():
+    # 純 http 或未設定：LINE 無法顯示 → 走「無法顯示」的後備文字，卡片不含 image
+    card = fm.payment_info_card("7/12（日）", "15:00", "http://example.com/qr.png")
+    body = card["contents"]["body"]["contents"]
+    assert not any(item.get("type") == "image" for item in body)
+    assert any("無法顯示" in item.get("text", "") for item in body)
+
+
+def test_normalize_image_url_google_drive_view_link():
+    assert fm.normalize_image_url(
+        "https://drive.google.com/file/d/ABC123xyz/view?usp=sharing"
+    ) == "https://drive.google.com/uc?export=view&id=ABC123xyz"
+
+
+def test_normalize_image_url_google_drive_open_link():
+    assert fm.normalize_image_url(
+        "https://drive.google.com/open?id=ABC123xyz"
+    ) == "https://drive.google.com/uc?export=view&id=ABC123xyz"
+
+
+def test_normalize_image_url_dropbox_dl_to_raw():
+    out = fm.normalize_image_url("https://www.dropbox.com/s/abc/qr.png?dl=0")
+    assert "raw=1" in out
+    assert "dl=0" not in out
+
+
+def test_normalize_image_url_rejects_non_https():
+    assert fm.normalize_image_url("http://example.com/qr.png") == ""
+    assert fm.normalize_image_url("") == ""
+    assert fm.normalize_image_url("   ") == ""
+
+
+def test_normalize_image_url_passes_through_direct_https():
+    assert fm.normalize_image_url(
+        "https://cdn.example.com/qr.png"
+    ) == "https://cdn.example.com/qr.png"
+
+
 def test_ornament_divider_is_center_aligned():
     card = fm.booking_confirmed_card("王小明", "7/12（日）", "15:00")
     dividers = [item for item in card["contents"]["body"]["contents"] if item.get("type") == "box" and item.get("alignItems") == "center"]

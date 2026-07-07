@@ -210,6 +210,57 @@ async def delete_booking_api(payload: DeleteBookingPayload):
         "notified": notified,
     }
 
+@router.get("/api/debug/qr")
+async def debug_qr(token: str = ""):
+    """診斷匯款 QR Code 為何顯示不出來。需帶 admin token。
+
+    直接抓一次 PAYMENT_QR_IMAGE_URL，回報 LINE 端會遇到的實際狀況：
+    是否有設定、是否 https、能否連線、Content-Type 是不是圖片。
+    """
+    _assert_admin_token(token)
+    settings = get_settings()
+    raw = settings.payment_qr_image_url or ""
+    normalized = fm.normalize_image_url(raw)
+    result = {
+        "set": bool(raw.strip()),
+        "raw": raw,
+        "normalized": normalized,
+        "https": raw.strip().lower().startswith("https://"),
+        "usable_by_line": bool(normalized),
+    }
+    if not normalized:
+        result["note"] = (
+            "URL 未設定或非 https，LINE 無法顯示。"
+            "請在 Vercel 設定 PAYMENT_QR_IMAGE_URL 為 https 開頭的圖檔直連。"
+        )
+        return result
+
+    try:
+        import httpx
+
+        r = httpx.get(normalized, timeout=10.0, follow_redirects=True)
+        content_type = r.headers.get("content-type", "")
+        result.update({
+            "reachable": True,
+            "status_code": r.status_code,
+            "content_type": content_type,
+            "content_length": len(r.content),
+            "content_type_is_image": content_type.startswith("image/"),
+        })
+        if r.status_code >= 300:
+            result["note"] = f"HTTP {r.status_code}：圖檔無法存取，LINE 會顯示空白。"
+        elif not content_type.startswith("image/"):
+            result["note"] = (
+                f"回傳的是 {content_type or '未知'} 而不是圖片，"
+                "多半是貼了『分享頁』網址而非圖檔直連。請改用直接指向 .png／.jpg 的網址。"
+            )
+        else:
+            result["note"] = "看起來正常：https + 圖片 Content-Type，LINE 應可正常顯示。"
+    except Exception as e:
+        result.update({"reachable": False, "note": f"連線失敗：{e}"})
+    return result
+
+
 @router.get("/api/cron")
 async def cron(authorization: str = Header(default="")):
     settings = get_settings()
