@@ -5,6 +5,7 @@
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date
 
 import httpx
@@ -90,21 +91,6 @@ def _headers() -> dict | None:
     }
 
 
-def _notion_error_message(response: httpx.Response) -> str:
-    message = ""
-    try:
-        body = response.json()
-        message = body.get("message") or body.get("code") or ""
-    except Exception:
-        message = response.text or ""
-    text = f"HTTP {response.status_code}"
-    if message:
-        text += f" — {message}"
-    if response.status_code == 404:
-        text += "；請確認資料庫已 share 給 integration"
-    return text
-
-
 def _post(path: str, payload: dict, timeout: float = NOTION_DEFAULT_TIMEOUT) -> dict:
     headers = _headers()
     if not headers:
@@ -163,6 +149,9 @@ def find_customer_by_line_id(user_id: str, timeout: float = NOTION_DEFAULT_TIMEO
         data = _post(f"data_sources/{CUSTOMER_DS}/query", payload, timeout=timeout)
     except NotionAPIError as e:
         return CustomerLookup("error", error=str(e))
+    if data is None:
+        # _post 已記錄 HTTP 錯誤（例如 404 資料庫未分享），視為查詢失敗
+        return CustomerLookup("error", error=get_last_error())
     customer = (data.get("results") or [None])[0]
     return CustomerLookup("found", customer=customer) if customer else CustomerLookup("not_found")
 
@@ -173,7 +162,7 @@ def create_customer(payload: dict) -> str | None:
     if birth:
         props["阳历"] = _date(birth)
     data = _post("pages", {"parent": {"data_source_id": CUSTOMER_DS}, "properties": props})
-    return data.get("id")
+    return data.get("id") if data else None
 
 
 def update_customer_status(page_id: str, status: str) -> bool:
@@ -202,9 +191,11 @@ def sync_booking_to_crm(pending: dict) -> tuple[bool, str]:
     _last_error = ""
     if not get_settings().notion_api_key:
         return False, "NOTION_API_KEY 未設定"
-    customer = find_customer_by_line_id(pending.get("u", ""))
-    is_new = customer is None
-    page_id = create_customer(pending) if is_new else customer.get("id")
+    lookup = find_customer_by_line_id(pending.get("u", ""))
+    if lookup.failed:
+        return False, f"客戶檔案查詢失敗（{lookup.error}）"
+    is_new = lookup.not_found
+    page_id = create_customer(pending) if is_new else lookup.customer.get("id")
     if not page_id:
         return _fail("客戶檔案建立/查詢失敗")
     if not is_new and not update_customer_status(page_id, "服务中"):
