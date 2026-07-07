@@ -142,12 +142,6 @@ def is_admin(user_id: str) -> bool:
     return bool(settings.admin_line_user_id and user_id == settings.admin_line_user_id)
 
 
-def _payment_qr_image_url() -> str:
-    """取得可被 LINE Flex image 使用的付款 QR Code HTTPS URL。"""
-    url = (settings.payment_qr_image_url or "").strip()
-    return url if url.startswith("https://") else ""
-
-
 def _parse_booking_number(text: str) -> int | None:
     """從指令文字中解析編號，例如 '/ok 2' → 2，'/ok' → None。"""
     m = re.search(r"/(?:ok|no|paid)\s+(\d+)", text)
@@ -388,14 +382,6 @@ def _cmd_booking_ok(event, user_id, text):
         return
 
     date_label = format_date_label(booking["d"])
-    qr_image_url = _payment_qr_image_url()
-    if not qr_image_url:
-        reply_text(
-            event,
-            "⚠️ 尚未設定可顯示的匯款 QR Code 圖片網址。\n\n"
-            "請先在環境變數 PAYMENT_QR_IMAGE_URL 設定 https 圖片網址，再重新執行 /ok。",
-        )
-        return
 
     # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
     ok = update_booking_status(ref, "awaiting_payment", booking)
@@ -414,7 +400,7 @@ def _cmd_booking_ok(event, user_id, text):
         fm.payment_info_card(
             date_label,
             booking["t"],
-            qr_image_url,
+            settings.payment_qr_image_url,
         ),
     )
 

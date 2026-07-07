@@ -147,7 +147,7 @@ def test_ok_with_no_pending_bookings(line_env):
     assert line_env.replies[-1] == ["目前沒有待確認日期的預約。"]
 
 
-def test_ok_requires_https_payment_qr_url(line_env, monkeypatch):
+def test_ok_continues_when_payment_qr_url_missing(line_env, monkeypatch):
     monkeypatch.setattr(wh.settings, "payment_qr_image_url", "")
     _seed_open_slots(line_env)
     wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
@@ -156,9 +156,9 @@ def test_ok_requires_https_payment_qr_url(line_env, monkeypatch):
     line_env.pushes.clear()
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
 
-    assert "PAYMENT_QR_IMAGE_URL" in line_env.replies[-1][0]
-    assert line_env.pushes == []
-    assert "awaiting_payment" not in line_env.kv.store[next(iter(k for k in line_env.kv.store if k.startswith("booking:")))]
+    assert "匯款資訊已發送給客人" in line_env.replies[-1][0]
+    assert line_env.pushes == [("cust1", [("FLEX", "匯款資訊 — 預約日期已確認")])]
+    assert "awaiting_payment" in line_env.kv.store[next(iter(k for k in line_env.kv.store if k.startswith("booking:")))]
 
 
 def test_full_booking_lifecycle(line_env):
