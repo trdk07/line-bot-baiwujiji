@@ -48,9 +48,9 @@ from app.services.state_service import (
     get_user_booking_by_status,
     save_done_booking, get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
-    set_intake_pending, clear_intake_pending,
-    set_intake_step, get_intake_step, clear_intake_step,
-    save_intake_draft, get_intake_draft, clear_intake_draft,
+    set_intake_pending, clear_intake_state, mark_intake_reprompted,
+    set_intake_step, get_intake_step,
+    save_intake_draft, get_intake_draft,
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
     enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
@@ -62,7 +62,12 @@ from app.services.calendar_service import (
     update_event,
     format_date_label,
 )
-from app.services.crm_service import find_customer_by_line_id, sync_booking_to_crm
+from app.services.crm_service import (
+    NOTION_PREVIEW_TIMEOUT,
+    find_customer_by_line_id,
+    sync_booking_to_crm,
+    parse_birth_date,
+)
 from app.templates import flex_messages as fm
 
 logger = logging.getLogger(__name__)
@@ -219,7 +224,7 @@ def _parse_labeled_intake(text: str) -> tuple[str, str, str]:
         quest_m.group(1).strip() if quest_m else "",
     )
 
-def _parse_intake_text(text: str) -> tuple[str, str, str]:
+def _parse_intake_text(text: str, allow_line_fallback: bool = True) -> tuple[str, str, str]:
     """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
     優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按標籤或行分割。
     """
@@ -237,14 +242,12 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
         if labeled_name and labeled_birth:
             name, birth, question = labeled_name, labeled_birth, labeled_question
 
-    if not (name and birth):
+    if not (name and birth) and allow_line_fallback:
         lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-        if len(lines) >= 3:
+        if len(lines) >= 2 and parse_birth_date(lines[1]):
             name = lines[0]
             birth = lines[1]
-            question = "\n".join(lines[2:])
-        elif len(lines) == 2:
-            name, birth = lines[0], lines[1]
+            question = "\n".join(lines[2:]) if len(lines) >= 3 else ""
         elif len(lines) == 1:
             name = lines[0]
 
@@ -254,6 +257,29 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
 
     return name, birth, question
 
+
+
+def _parse_symbol_intake_form(text: str) -> tuple[str, str, str]:
+    name_m = re.search(r"①\s*(.+?)(?=②|③|\Z)", text, re.DOTALL)
+    birth_m = re.search(r"②\s*(.+?)(?=③|\Z)", text, re.DOTALL)
+    quest_m = re.search(r"③\s*(.+)", text, re.DOTALL)
+    return (
+        name_m.group(1).strip() if name_m else "",
+        birth_m.group(1).strip() if birth_m else "",
+        quest_m.group(1).strip() if quest_m else "",
+    )
+
+
+def _finish_intake(event, user_id: str, name: str, birth_date: str, question: str, prefix_text: str = "提供了諮詢資料"):
+    clear_intake_state(user_id)
+    display_name = get_user_name(user_id, configuration)
+    save_intake_data(user_id, name, birth_date, question)
+    reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
+    notify_admin_flex(
+        user_id,
+        fm.intake_card(display_name, name, birth_date, question),
+        prefix_text=prefix_text,
+    )
 
 def _booking_url() -> str:
     base = settings.public_base_url.rstrip("/")
@@ -417,6 +443,7 @@ def _cmd_booking_no(event, user_id, text):
     push_status = "" if push_ok else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
     reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約{push_status}")
     delete_booking(ref)
+    clear_intake_state(ctx_user)
 
 
 def _cmd_booking_paid(event, user_id, text):
@@ -446,9 +473,7 @@ def _cmd_booking_paid(event, user_id, text):
     intake_name, intake_birth, intake_question = get_intake_data(ctx_user)
     customer_name = intake_name or booking["n"]
     clear_intake_data(ctx_user)
-    clear_intake_pending(ctx_user)
-    clear_intake_step(ctx_user)
-    clear_intake_draft(ctx_user)
+    clear_intake_state(ctx_user)
 
     # 通知客人：預約確認卡片
     push_ok = push_flex_to_user(
@@ -473,8 +498,11 @@ def _cmd_booking_paid(event, user_id, text):
             "t": booking["t"],
         }
         if enqueue_crm(payload):
-            existing = find_customer_by_line_id(ctx_user)
-            customer_label = "老客戶" if existing else "新客戶"
+            existing = find_customer_by_line_id(ctx_user, timeout=NOTION_PREVIEW_TIMEOUT)
+            if existing.failed:
+                customer_label = "（無法判定）"
+            else:
+                customer_label = "老客戶" if existing.found else "新客戶"
             notify_admin_flex(ctx_user, fm.crm_preview_card(payload, customer_label), prefix_text="CRM 資料待確認")
 
     if cal_ok:
@@ -538,6 +566,7 @@ def _cmd_booking_clear(event, user_id, text):
     clear_confirm_pending()
     for e in all_bookings:
         delete_booking(e["ref"])
+        clear_intake_state(e["user_id"])
     reply_text(event, f"🗑️ 已清除全部 {count} 筆預約。")
 
 
@@ -802,39 +831,30 @@ def handle_text_message(event: MessageEvent):
             return
 
     # === 諮詢資料填寫攔截（優先於關鍵字比對）===
-    # 只有訊息不匹配任何關鍵字、或明顯是完整的姓名+生日格式時，才當成諮詢資料，
-    # 避免客人預約後又輸入「我要預約」「服務項目」等其他意圖被誤吞。
-    if not is_admin(user_id) and intake_pending:
-        if intent == "intake_help":
-            set_intake_step(user_id, "name")
-            _reply_intake_step_prompt(event, "name")
+    if not is_admin(user_id) and intake_pending and intent not in {"human", "payment_reported"}:
+        if intent in {"intake_help"}:
+            _reply_intake_prompt(event)
+            return
+
+        if intent == "intake_form":
+            name, birth_date, question = _parse_symbol_intake_form(user_text)
+            _finish_intake(event, user_id, name, birth_date, question, prefix_text="補填了諮詢資料")
             return
 
         if _looks_like_placeholder_message(user_text):
-            _reply_intake_step_prompt(event, get_intake_step(user_id) or "name")
+            reply_text(event, INTAKE_RETRY_TEXT)
             return
 
-        name, birth_date, question = _parse_intake_text(user_text)
-        looks_like_intake = bool(name and birth_date)
+        step = get_intake_step(user_id)
+        name, birth_date, question = _parse_intake_text(user_text, allow_line_fallback=not bool(step))
         if _is_placeholder_intake(name, birth_date, question):
-            _reply_intake_step_prompt(event, get_intake_step(user_id) or "name")
+            reply_text(event, INTAKE_RETRY_TEXT)
             return
-        if looks_like_intake:
-            clear_intake_pending(user_id)
-            clear_intake_step(user_id)
-            clear_intake_draft(user_id)
-            display_name = get_user_name(user_id, configuration)
-            save_intake_data(user_id, name, birth_date, question)
-            reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
-            notify_admin_flex(
-                user_id,
-                fm.intake_card(display_name, name, birth_date, question),
-                prefix_text="提供了諮詢資料",
-            )
+        if name and birth_date:
+            _finish_intake(event, user_id, name, birth_date, question)
             return
 
-        if intent is None:
-            step = get_intake_step(user_id) or "name"
+        if step:
             if step == "name":
                 save_intake_draft(user_id, n=user_text)
                 set_intake_step(user_id, "birth")
@@ -847,23 +867,18 @@ def handle_text_message(event: MessageEvent):
                 return
             if step == "question":
                 draft = get_intake_draft(user_id)
-                final_name = draft.get("n", "")
-                final_birth = draft.get("b", "")
-                final_question = user_text
-                clear_intake_pending(user_id)
-                clear_intake_step(user_id)
-                clear_intake_draft(user_id)
-                display_name = get_user_name(user_id, configuration)
-                save_intake_data(user_id, final_name, final_birth, final_question)
-                reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
-                notify_admin_flex(
-                    user_id,
-                    fm.intake_card(display_name, final_name, final_birth, final_question),
-                    prefix_text="提供了諮詢資料",
-                )
+                _finish_intake(event, user_id, draft.get("n", ""), draft.get("b", ""), user_text)
                 return
 
-        # 非諮詢資料意圖（例如服務項目）會交回一般關鍵字流程處理。
+        if intent is not None:
+            if mark_intake_reprompted(user_id):
+                _reply_intake_prompt(event)
+            return
+
+        save_intake_draft(user_id, n=user_text)
+        set_intake_step(user_id, "birth")
+        _reply_intake_step_prompt(event, "birth")
+        return
 
     # === 第一層：關鍵字比對（0 Token）===
     if intent:
@@ -882,20 +897,8 @@ def handle_text_message(event: MessageEvent):
         # 諮詢資料後備：①②③ 格式（intake_pending 已消耗後仍可補填）
         # ----------------------------------------------------------
         if intent == "intake_form":
-            name_m = re.search(r"①\s*(.+?)(?=②|③|\Z)", user_text, re.DOTALL)
-            birth_m = re.search(r"②\s*(.+?)(?=③|\Z)", user_text, re.DOTALL)
-            quest_m = re.search(r"③\s*(.+)", user_text, re.DOTALL)
-            name = name_m.group(1).strip() if name_m else ""
-            birth_date = birth_m.group(1).strip() if birth_m else ""
-            question = quest_m.group(1).strip() if quest_m else ""
-            display_name = get_user_name(user_id, configuration)
-            save_intake_data(user_id, name, birth_date, question)
-            reply_text(event, "已收到您的諮詢資料 ✓\n\n老師確認預約時會一併查閱，謝謝您的配合 🙏")
-            notify_admin_flex(
-                user_id,
-                fm.intake_card(display_name, name, birth_date, question),
-                prefix_text="補填了諮詢資料",
-            )
+            name, birth_date, question = _parse_symbol_intake_form(user_text)
+            _finish_intake(event, user_id, name, birth_date, question, prefix_text="補填了諮詢資料")
             return
 
         # ----------------------------------------------------------
@@ -982,13 +985,12 @@ def handle_text_message(event: MessageEvent):
                 # 儲存預約（狀態：pending，等管理員確認日期）
                 save_booking(user_id, date_str, time_str, user_name)
 
-                # 標記等待填寫諮詢資料（24 小時有效），並改用逐步問答降低填錯機率
+                # 標記等待填寫諮詢資料（24 小時有效），先以模板卡片引導；逐步問答作為 fallback。
+                clear_intake_state(user_id)
                 set_intake_pending(user_id)
-                clear_intake_draft(user_id)
-                set_intake_step(user_id, "name")
 
-                # 回覆客人：逐步詢問姓名 → 出生年月日時 → 問題
-                _reply_intake_step_prompt(event, "name", date_label, time_str)
+                # 回覆客人：模板卡片 + deep link 預填格式
+                _reply_intake_prompt(event, date_label, time_str)
 
                 # 通知管理員
                 notify_admin(
