@@ -23,6 +23,7 @@ KEYWORD_PATTERNS = [
     (r"^/crm\b", "crm"),
     (r"^/booking-admin$|^設定時段$", "booking_admin"),
     (r"^/myid$", "get_my_id"),
+    (r"^填寫諮詢資料$|^填資料$|^諮詢資料格式$", "intake_help"),
 
     # --- 諮詢資料後備（①②③ 格式，intake_pending 消耗後仍可補填）---
     (r"①[\s\S]*②", "intake_form"),

@@ -236,6 +236,27 @@ def update_event(event_id: str, date_str: str, time_str: str, customer_name: str
         return False, msg
 
 
+
+def delete_event(event_id: str) -> tuple[bool, str]:
+    """刪除 Google Calendar 事件。回傳 (成功與否, 錯誤訊息)。"""
+    service, init_error = _get_calendar_service()
+    settings = get_settings()
+
+    if not service:
+        return False, init_error or "無法建立 Calendar 服務"
+
+    try:
+        service.events().delete(
+            calendarId=settings.google_calendar_id,
+            eventId=event_id,
+        ).execute()
+        logger.info("Event deleted: %s", event_id)
+        return True, ""
+    except Exception as e:
+        msg = str(e)
+        logger.error("Calendar delete event error: %s", msg, exc_info=True)
+        return False, msg
+
 def format_date_label(date_str: str) -> str:
     """格式化日期，例如 '3/2（二）'。"""
     d = datetime.strptime(date_str, "%Y-%m-%d")
