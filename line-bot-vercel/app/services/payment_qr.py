@@ -6,6 +6,7 @@ vercel.json 的 rewrites 會把所有路徑導到 FastAPI，靜態檔案不會�
 與 templates/booking.html 同一種機制）。
 """
 
+import os
 from pathlib import Path
 
 from app.config import get_settings
@@ -15,10 +16,30 @@ QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "static" / "qr-payment.png
 QR_IMAGE_ROUTE = "/qr-payment.png"
 
 
-def self_hosted_qr_url() -> str:
-    """app 自己伺服的 QR 圖網址；PUBLIC_BASE_URL 未設定或圖檔不存在時回空字串。"""
+def _public_base_url() -> str:
+    """取得可對外的 https base URL。
+
+    優先用 PUBLIC_BASE_URL（使用者自訂網域時設定），未設定時退回 Vercel
+    自動注入的網域環境變數 —— 這樣部署到 Vercel 上完全不需要任何手動設定，
+    QR 圖就能自動用正確的網址對外提供。
+    """
     base = (get_settings().public_base_url or "").strip().rstrip("/")
-    if base.lower().startswith("https://") and QR_IMAGE_PATH.is_file():
+    if base.lower().startswith("https://"):
+        return base
+    # Vercel 部署時自動注入，無需使用者設定：
+    #   VERCEL_PROJECT_PRODUCTION_URL → 正式網域（webhook 一律走這個）
+    #   VERCEL_URL                    → 當次 deployment 的網址（後備）
+    for env_name in ("VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_URL"):
+        host = (os.environ.get(env_name) or "").strip().strip("/")
+        if host:
+            return f"https://{host}"
+    return ""
+
+
+def self_hosted_qr_url() -> str:
+    """app 自己伺服的 QR 圖網址；無法判定對外網址或圖檔不存在時回空字串。"""
+    base = _public_base_url()
+    if base and QR_IMAGE_PATH.is_file():
         return f"{base}{QR_IMAGE_ROUTE}"
     return ""
 
