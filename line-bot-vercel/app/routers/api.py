@@ -9,12 +9,12 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.services.calendar_service import TW_TZ, delete_event, format_date_label, update_event
+from app.services.calendar_service import TW_TZ, format_date_label, update_event
 from app.services.notify_service import push_text_to_user, push_flex_to_user
 from app.services.slots_service import SELECTABLE_TIMES, get_open_slots, set_open_slots
 from app.services.state_service import (
-    kv_cmd, delete_booking, delete_done_booking, get_all_done_bookings, get_all_queue_bookings,
-    remove_crm_booking, update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime,
+    kv_cmd, get_all_done_bookings, get_all_queue_bookings,
+    update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime,
 )
 from app.templates import flex_messages as fm
 
@@ -33,13 +33,6 @@ class ChangeBookingPayload(BaseModel):
     date: str
     time: str
     token: str = ""
-
-
-class DeleteBookingPayload(BaseModel):
-    ref: str
-    status: str
-    token: str = ""
-    notify: bool = True
 
 
 def _month_bounds(month: str) -> tuple[str, str]:
@@ -168,45 +161,6 @@ async def change_booking(payload: ChangeBookingPayload):
         "calendar": {"ok": cal_ok, "error": cal_error},
         "crmPendingUpdated": crm_updated,
         "notified": push_ok,
-    }
-
-
-@router.post("/api/bookings/delete")
-async def delete_booking_api(payload: DeleteBookingPayload):
-    _assert_admin_token(payload.token)
-    entries = get_all_queue_bookings() + get_all_done_bookings()
-    entry = next((e for e in entries if e["ref"] == payload.ref and e["booking"].get("s") == payload.status), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail="booking not found")
-
-    booking = entry["booking"]
-    is_done = booking.get("s") == "done"
-    if is_done:
-        delete_done_booking(payload.ref)
-    else:
-        delete_booking(payload.ref)
-
-    cal_ok, cal_error = True, ""
-    if is_done and booking.get("cal_id"):
-        cal_ok, cal_error = delete_event(booking["cal_id"])
-
-    crm_removed = remove_crm_booking(
-        entry["user_id"],
-        booking.get("d", ""),
-        booking.get("t", ""),
-    )
-    notified = False
-    if payload.notify:
-        notified = push_text_to_user(
-            entry["user_id"],
-            f"您的預約已取消：{format_date_label(booking.get('d', ''))} {booking.get('t', '')}。\n\n"
-            "如需重新預約，請輸入「我要預約」。",
-        )
-    return {
-        "ok": True,
-        "calendar": {"ok": cal_ok, "error": cal_error},
-        "crmPendingRemoved": crm_removed,
-        "notified": notified,
     }
 
 @router.get("/api/cron")

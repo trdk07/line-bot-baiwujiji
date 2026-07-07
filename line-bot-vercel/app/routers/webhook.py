@@ -216,10 +216,6 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
     """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
     優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按行分割。
     """
-    labeled_name, labeled_birth, labeled_question = _parse_labeled_intake(text)
-    if labeled_name and labeled_birth:
-        return labeled_name, labeled_birth, labeled_question
-
     marker = r"(?:^|\n)\s*{}(?:[.\-、．]|\s+)\s*"
     name_m = re.search(marker.format(1) + r"(.+?)(?=" + marker.format(2) + r"|\Z)", text, re.DOTALL)
     birth_m = re.search(marker.format(2) + r"(.+?)(?=" + marker.format(3) + r"|\Z)", text, re.DOTALL)

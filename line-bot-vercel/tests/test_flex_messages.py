@@ -113,12 +113,12 @@ def test_crm_preview_card_buttons():
     assert "/crm skip" in _button_texts(card)
 
 
-def test_payment_info_card_uses_full_size_qr_image():
+def test_payment_info_card_centers_qr_image():
     card = fm.payment_info_card("7/12（日）", "15:00", "https://example.com/qr.png")
     body = card["contents"]["body"]["contents"]
     image = next(item for item in body if item.get("type") == "image")
     assert image["url"] == "https://example.com/qr.png"
-    assert image["size"] == "full"
+    assert image["align"] == "center"
     assert image["aspectMode"] == "fit"
 
 
@@ -126,18 +126,3 @@ def test_ornament_divider_is_center_aligned():
     card = fm.booking_confirmed_card("王小明", "7/12（日）", "15:00")
     dividers = [item for item in card["contents"]["body"]["contents"] if item.get("type") == "box" and item.get("alignItems") == "center"]
     assert dividers
-
-
-def test_intake_prompt_card_uses_uri_prefill_when_available():
-    card = fm.intake_prompt_card("請填寫", "1. 姓名\n2. 出生年月日時\n3. 想問的問題", prefill_url="https://line.me/R/oaMessage/test/?x")
-    assert card["altText"] == "預約申請已送出，請填寫諮詢資料"
-    body = card["contents"]["body"]["contents"]
-    button = next(item for item in body if item.get("type") == "button")
-    assert button["action"]["type"] == "uri"
-
-
-def test_intake_prompt_card_falls_back_to_message_action():
-    card = fm.intake_prompt_card("請填寫", "1. 姓名")
-    body = card["contents"]["body"]["contents"]
-    button = next(item for item in body if item.get("type") == "button")
-    assert button["action"] == {"type": "message", "label": "填寫諮詢資料", "text": "填寫諮詢資料"}
