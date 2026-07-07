@@ -33,7 +33,6 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import (
     MessageEvent,
     TextMessageContent,
-    FollowEvent,
 )
 
 from app.config import get_settings
@@ -141,6 +140,12 @@ def reply_flex(event, flex_dict: dict):
 def is_admin(user_id: str) -> bool:
     """檢查是否為管理員。"""
     return bool(settings.admin_line_user_id and user_id == settings.admin_line_user_id)
+
+
+def _payment_qr_image_url() -> str:
+    """取得可被 LINE Flex image 使用的付款 QR Code HTTPS URL。"""
+    url = (settings.payment_qr_image_url or "").strip()
+    return url if url.startswith("https://") else ""
 
 
 def _parse_booking_number(text: str) -> int | None:
@@ -383,6 +388,14 @@ def _cmd_booking_ok(event, user_id, text):
         return
 
     date_label = format_date_label(booking["d"])
+    qr_image_url = _payment_qr_image_url()
+    if not qr_image_url:
+        reply_text(
+            event,
+            "⚠️ 尚未設定可顯示的匯款 QR Code 圖片網址。\n\n"
+            "請先在環境變數 PAYMENT_QR_IMAGE_URL 設定 https 圖片網址，再重新執行 /ok。",
+        )
+        return
 
     # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
     ok = update_booking_status(ref, "awaiting_payment", booking)
@@ -401,7 +414,7 @@ def _cmd_booking_ok(event, user_id, text):
         fm.payment_info_card(
             date_label,
             booking["t"],
-            settings.payment_qr_image_url,
+            qr_image_url,
         ),
     )
 
@@ -471,15 +484,16 @@ def _cmd_booking_paid(event, user_id, text):
 
     # 取得諮詢資料（姓名、出生年月日、問題）
     intake_name, intake_birth, intake_question = get_intake_data(ctx_user)
-    customer_name = intake_name or booking["n"]
+    line_display_name = booking["n"]
+    crm_customer_name = intake_name or line_display_name
     clear_intake_data(ctx_user)
     clear_intake_state(ctx_user)
 
-    # 通知客人：預約確認卡片
+    # 通知客人：預約確認卡片用 LINE 顯示名稱；諮詢資料另列生辰與問題。
     push_ok = push_flex_to_user(
         ctx_user,
         fm.booking_confirmed_card(
-            customer_name, date_label, booking["t"],
+            line_display_name, date_label, booking["t"],
             birth_date=intake_birth, question=intake_question,
         ),
     )
@@ -491,7 +505,7 @@ def _cmd_booking_paid(event, user_id, text):
     if settings.notion_api_key:
         payload = {
             "u": ctx_user,
-            "n": customer_name,
+            "n": crm_customer_name,
             "b": intake_birth,
             "q": intake_question,
             "d": booking["d"],
@@ -763,28 +777,6 @@ INTENT_HANDLERS = {
 # ============================================================
 # 事件 Handlers
 # ============================================================
-@handler.add(FollowEvent)
-def handle_follow(event: FollowEvent):
-    """用戶加好友時觸發。"""
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-
-        welcome = (
-            "歡迎來到「百無禁忌」。\n\n"
-            "我是工作室的助理，有任何問題都可以問我。\n\n"
-            "👉 輸入「服務項目」查看我們的服務\n"
-            "👉 輸入「時段」開啟預約月曆\n"
-            "👉 輸入「我要預約」直接預約諮詢\n"
-            "👉 輸入「找小夏老師」由老師親自回覆"
-        )
-
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=welcome)],
-            )
-        )
-
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event: MessageEvent):
