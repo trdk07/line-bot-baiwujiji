@@ -130,11 +130,11 @@ def test_intake_pending_and_data(fake_kv):
     ss.clear_intake_pending("u1")
     assert ss.has_intake_pending("u1") is False
 
-    assert ss.get_intake_data("u1") == ("", "")
-    ss.save_intake_data("u1", "1990-01-01", "想問感情")
-    assert ss.get_intake_data("u1") == ("1990-01-01", "想問感情")
+    assert ss.get_intake_data("u1") == ("", "", "")
+    ss.save_intake_data("u1", "王小明", "1990-01-01", "想問感情")
+    assert ss.get_intake_data("u1") == ("王小明", "1990-01-01", "想問感情")
     ss.clear_intake_data("u1")
-    assert ss.get_intake_data("u1") == ("", "")
+    assert ss.get_intake_data("u1") == ("", "", "")
 
 
 def test_done_booking_and_reschedule(fake_kv):

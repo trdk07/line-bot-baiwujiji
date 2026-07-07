@@ -181,6 +181,15 @@
       pointer-events: none;
       transition: opacity 150ms ease-out;
     }
+    .admin-panel { display: none; margin: 18px 0; padding: 14px; background: var(--sheet); border: 1px solid var(--line); border-radius: 14px; }
+    .admin-panel.show { display: block; }
+    .booking-row { border-top: 1px solid var(--line); padding: 12px 0; }
+    .booking-row:first-of-type { border-top: 0; }
+    .booking-meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .booking-form { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 6px; margin-top: 8px; }
+    .booking-form input, .booking-form button { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; font: inherit; }
+    .booking-form button { border: 0; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+    .booking-form .delete { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
     .toast.show { opacity: 1; }
   </style>
 </head>
@@ -199,6 +208,11 @@
     <div class="weekdays"><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div></div>
     <div class="grid" id="grid"></div>
     <div class="empty" id="empty" hidden>✦<br>本月時段尚未開放，請稍候</div>
+    <section class="admin-panel" id="adminPanel">
+      <div class="panel-title">進行中／已成立預約</div>
+      <div class="hint">可在網頁改期；會同步更新預約資料、Google Calendar（已成立預約）、CRM 待確認資料，並通知顧客。</div>
+      <div id="bookingList"></div>
+    </section>
   </main>
   <section class="sheet hidden" id="sheet">
     <div class="handle"></div>
@@ -220,6 +234,7 @@
     let selectedDate = "";
     let selectedTime = "";
     let editing = false;
+    let bookings = [];
 
     const $ = (id) => document.getElementById(id);
     const pad = (n) => String(n).padStart(2, "0");
@@ -248,7 +263,72 @@
         const res = await fetch(`/api/slots?month=${month}`);
         payload = await res.json();
       }
+      if (adminToken) await loadBookings();
       render();
+    }
+
+    async function loadBookings() {
+      const res = await fetch(`/api/bookings?token=${encodeURIComponent(adminToken)}`);
+      if (res.ok) bookings = (await res.json()).bookings || [];
+    }
+
+    function renderBookings() {
+      $("adminPanel").classList.toggle("show", Boolean(adminToken));
+      const list = $("bookingList");
+      if (!adminToken) return;
+      if (!bookings.length) {
+        list.innerHTML = `<div class="empty" style="padding:20px">目前沒有任何預約</div>`;
+        return;
+      }
+      const statusMap = {pending: "待確認", awaiting_payment: "待匯款", payment_reported: "已回報", done: "已成立"};
+      list.innerHTML = bookings.map((b) => `
+        <div class="booking-row">
+          <strong>${escapeHtml(b.name || "未命名")}</strong>
+          <div class="booking-meta">${escapeHtml(statusMap[b.status] || b.status)}｜${escapeHtml(b.date)} ${escapeHtml(b.time)}</div>
+          <div class="booking-form">
+            <input type="date" value="${escapeHtml(b.date)}" data-ref="${escapeHtml(b.ref)}" data-field="date">
+            <input type="time" value="${escapeHtml(b.time)}" data-ref="${escapeHtml(b.ref)}" data-field="time">
+            <button type="button" data-action="change" data-ref="${escapeHtml(b.ref)}" data-status="${escapeHtml(b.status)}">改期</button>
+            <button type="button" class="delete" data-action="delete" data-ref="${escapeHtml(b.ref)}" data-status="${escapeHtml(b.status)}" data-label="${escapeHtml((b.name || '未命名') + ' ' + b.date + ' ' + b.time)}">刪除</button>
+          </div>
+        </div>`).join("");
+      list.querySelectorAll("button[data-action='change']").forEach((btn) => {
+        btn.onclick = () => changeBooking(btn.dataset.ref, btn.dataset.status);
+      });
+      list.querySelectorAll("button[data-action='delete']").forEach((btn) => {
+        btn.onclick = () => deleteBooking(btn.dataset.ref, btn.dataset.status, btn.dataset.label);
+      });
+    }
+
+    async function deleteBooking(ref, status, labelText) {
+      if (!confirm(`確定刪除這筆預約？\n${labelText}\n\n會通知顧客，已成立預約也會嘗試刪除 Google Calendar。`)) return;
+      const res = await fetch("/api/bookings/delete", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({ref, status, token: adminToken, notify: true})
+      });
+      if (!res.ok) return toast("刪除失敗");
+      toast("已刪除並通知顧客 ✦");
+      await load();
+    }
+
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>'"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+    }
+
+    async function changeBooking(ref, status) {
+      const inputs = [...document.querySelectorAll(`input[data-field]`)].filter((el) => el.dataset.ref === ref);
+      const date = inputs.find((el) => el.dataset.field === "date")?.value || "";
+      const time = inputs.find((el) => el.dataset.field === "time")?.value || "";
+      if (!date || !time) return toast("請選擇日期與時間");
+      const res = await fetch("/api/bookings/change", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({ref, status, date, time, token: adminToken})
+      });
+      if (!res.ok) return toast("改期失敗");
+      toast("已改期並通知顧客 ✦");
+      await load();
     }
 
     function render() {
@@ -257,6 +337,7 @@
       $("editToggle").style.display = adminToken ? "block" : "none";
       $("editToggle").classList.toggle("on", editing);
       $("top").classList.toggle("editing", editing);
+      renderBookings();
       const grid = $("grid");
       grid.innerHTML = "";
       const first = new Date(cursor);
