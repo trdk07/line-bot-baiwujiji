@@ -73,10 +73,15 @@ configuration = Configuration(access_token=settings.line_channel_access_token)
 
 
 INTAKE_TEMPLATE_TEXT = "1. 姓名\n2. 出生年月日時\n3. 想問的問題"
+INTAKE_PLACEHOLDERS = {"姓名", "出生年月日時", "出生年月日", "想問的問題", "想了解的問題", "問題"}
 INTAKE_PROMPT_TEXT = (
     "預約申請已送出 ✓\n\n"
     "小夏老師確認後會通知您，請稍候。\n\n"
     "也請先填寫諮詢資料，老師確認預約時會一併查閱。"
+)
+INTAKE_RETRY_TEXT = (
+    "剛剛收到的是格式範例，還不是您的資料。\n\n"
+    "請把「姓名／出生年月日時／想問的問題」改成您的實際內容後，再一次送出。"
 )
 
 
@@ -214,7 +219,7 @@ def _parse_labeled_intake(text: str) -> tuple[str, str, str]:
 
 def _parse_intake_text(text: str) -> tuple[str, str, str]:
     """解析諮詢資料文字，回傳 (姓名, 生日, 問題)。
-    優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按行分割。
+    優先比對 1. / 1- / 1、/「1 空白」格式，找不到就按標籤或行分割。
     """
     marker = r"(?:^|\n)\s*{}(?:[.\-、．]|\s+)\s*"
     name_m = re.search(marker.format(1) + r"(.+?)(?=" + marker.format(2) + r"|\Z)", text, re.DOTALL)
@@ -224,6 +229,11 @@ def _parse_intake_text(text: str) -> tuple[str, str, str]:
     name = name_m.group(1).strip() if name_m else ""
     birth = birth_m.group(1).strip() if birth_m else ""
     question = quest_m.group(1).strip() if quest_m else ""
+
+    if not (name and birth):
+        labeled_name, labeled_birth, labeled_question = _parse_labeled_intake(text)
+        if labeled_name and labeled_birth:
+            name, birth, question = labeled_name, labeled_birth, labeled_question
 
     if not (name and birth):
         lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
@@ -256,21 +266,19 @@ def _admin_booking_url() -> str:
 
 
 
-def _intake_prefill_url() -> str:
-    if not settings.bot_basic_id:
-        return ""
-    return f"https://line.me/R/oaMessage/{settings.bot_basic_id}/?{quote(INTAKE_TEMPLATE_TEXT)}"
+def _is_placeholder_intake(name: str, birth_date: str, question: str) -> bool:
+    values = [name.strip(), birth_date.strip(), question.strip()]
+    return any(value in INTAKE_PLACEHOLDERS for value in values if value)
 
 
-def _reply_intake_prompt(event, date_label: str = "", time_str: str = ""):
+def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt_text: str = INTAKE_PROMPT_TEXT):
     reply_flex(
         event,
         fm.intake_prompt_card(
-            INTAKE_PROMPT_TEXT,
+            prompt_text,
             INTAKE_TEMPLATE_TEXT,
             date_label=date_label,
             time_str=time_str,
-            prefill_url=_intake_prefill_url(),
         ),
     )
 
@@ -766,7 +774,10 @@ def handle_text_message(event: MessageEvent):
     if not is_admin(user_id) and intake_pending:
         name, birth_date, question = _parse_intake_text(user_text)
         looks_like_intake = bool(name and birth_date)
-        if intent is None or looks_like_intake:
+        if _is_placeholder_intake(name, birth_date, question) or (intent is None and not looks_like_intake):
+            _reply_intake_prompt(event, prompt_text=INTAKE_RETRY_TEXT)
+            return
+        if looks_like_intake:
             clear_intake_pending(user_id)
             display_name = get_user_name(user_id, configuration)
             save_intake_data(user_id, name, birth_date, question)

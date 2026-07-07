@@ -12,6 +12,7 @@ TEXT_TITLE = "#7B3F2A"   # 卡片標題（赤褐）
 TEXT_WHITE = "#4A453C"   # 主內文
 TEXT_GREY = "#6E675E"    # 淡色說明
 DIVIDER = "#C8B8A8"      # 分隔線
+QR_IMAGE_SIZE = "full"  # 付款 QR Code 需維持最大尺寸，避免 LINE 端顯示過小
 ACCENT_RED = "#8B2020"   # 主按鈕 / 預約完成強調
 BG_HEADER = "#3D1F1F"    # 深棕 header
 
@@ -725,7 +726,7 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
             {
                 "type": "image",
                 "url": qr_image_url,
-                "size": "xl",
+                "size": QR_IMAGE_SIZE,
                 "aspectMode": "fit",
                 "aspectRatio": "1:1",
                 "margin": "md",
