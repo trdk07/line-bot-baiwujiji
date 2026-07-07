@@ -14,7 +14,7 @@ from app.services.notify_service import push_text_to_user, push_flex_to_user
 from app.services.slots_service import SELECTABLE_TIMES, get_open_slots, set_open_slots
 from app.services.state_service import (
     kv_cmd, delete_booking, delete_done_booking, get_all_done_bookings, get_all_queue_bookings,
-    remove_crm_booking, update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime,
+    remove_crm_booking, update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime, clear_intake_state,
 )
 from app.templates import flex_messages as fm
 
@@ -185,6 +185,7 @@ async def delete_booking_api(payload: DeleteBookingPayload):
         delete_done_booking(payload.ref)
     else:
         delete_booking(payload.ref)
+    clear_intake_state(entry["user_id"])
 
     cal_ok, cal_error = True, ""
     if is_done and booking.get("cal_id"):

@@ -273,6 +273,21 @@ def clear_intake_pending(user_id: str):
     kv_cmd("DEL", f"intake_pending:{user_id}")
 
 
+def clear_intake_state(user_id: str):
+    """一次清除諮詢資料流程狀態；不清除已完成的 intake_data。"""
+    _pipeline([
+        ["DEL", f"intake_pending:{user_id}"],
+        ["DEL", f"intake_step:{user_id}"],
+        ["DEL", f"intake_draft:{user_id}"],
+        ["DEL", f"intake_reprompted:{user_id}"],
+    ])
+
+
+def mark_intake_reprompted(user_id: str) -> bool:
+    """標記本輪 intake pending 已重發過卡片；首次標記回 True。"""
+    return kv_cmd("SET", f"intake_reprompted:{user_id}", "1", "NX", "EX", INTAKE_PENDING_TTL) == "OK"
+
+
 def get_message_context(user_id: str) -> tuple:
     """
     合併查詢每則訊息都會用到的兩個狀態：Bot 是否運作中、該用戶是否在等待
