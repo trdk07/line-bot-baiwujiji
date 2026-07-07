@@ -41,9 +41,22 @@ def test_resolve_falls_back_when_env_url_not_https(monkeypatch):
     assert resolve_payment_qr_url() == "https://bot.example.com/qr-payment.png"
 
 
+def test_self_hosted_uses_vercel_domain_without_any_config(monkeypatch):
+    # Vercel 上完全不設 PUBLIC_BASE_URL / PAYMENT_QR_IMAGE_URL 時，
+    # 自動用 Vercel 注入的正式網域組出 QR 圖網址。
+    settings = get_settings()
+    monkeypatch.setattr(settings, "payment_qr_image_url", "")
+    monkeypatch.setattr(settings, "public_base_url", "")
+    monkeypatch.delenv("VERCEL_URL", raising=False)
+    monkeypatch.setenv("VERCEL_PROJECT_PRODUCTION_URL", "line-bot-baiwujiji.vercel.app")
+    assert resolve_payment_qr_url() == "https://line-bot-baiwujiji.vercel.app/qr-payment.png"
+
+
 def test_resolve_empty_when_nothing_configured(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "payment_qr_image_url", "")
     monkeypatch.setattr(settings, "public_base_url", "")
+    monkeypatch.delenv("VERCEL_PROJECT_PRODUCTION_URL", raising=False)
+    monkeypatch.delenv("VERCEL_URL", raising=False)
     assert self_hosted_qr_url() == ""
     assert resolve_payment_qr_url() == ""
