@@ -478,6 +478,49 @@ def get_taken_slots(date_str: str) -> set:
     }
 
 
+# ============================================================
+# 顧客檔案（永久累積，不設 TTL）
+# ============================================================
+# KV key:   customer:{user_id}
+# KV value: JSON {"n": 顯示名稱, "c": 完成次數, "first": 首次日期, "last": 最近日期}
+#
+# done:{ref} 只保留 30 天，這裡另存一份永久的累積紀錄，
+# 讓 Bot 與預約網頁能認出回頭客（歡迎回來、第 N 次、上次日期）。
+
+def record_customer_visit(user_id: str, name: str, date_str: str):
+    """預約完成（/paid）時累積顧客檔案：次數 +1、更新最近預約日期。"""
+    profile = get_customer_profile(user_id) or {}
+    profile["n"] = name or profile.get("n", "")
+    profile["c"] = int(profile.get("c", 0)) + 1
+    profile.setdefault("first", date_str)
+    profile["last"] = date_str
+    kv_cmd("SET", f"customer:{user_id}", json.dumps(profile, ensure_ascii=False))
+
+
+def get_customer_profile(user_id: str) -> dict | None:
+    """取得顧客累積檔案。從未完成過預約（或 KV 未設定）回傳 None。"""
+    raw = kv_get(f"customer:{user_id}")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def customer_link_sig(user_id: str) -> str:
+    """個人化預約連結的簽章：讓 /api/me 能驗證 uid 沒被竄改。
+
+    連結只會私訊給該客人本人；簽章用 LINE channel secret 衍生，
+    避免有人改網址上的 uid 查到別人的累積資料。
+    """
+    import hashlib
+    import hmac as hmac_mod
+
+    secret = get_settings().line_channel_secret.encode("utf-8")
+    return hmac_mod.new(secret, f"me:{user_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+
 CRM_QUEUE_TTL = 7 * 24 * 60 * 60
 
 

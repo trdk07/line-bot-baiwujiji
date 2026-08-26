@@ -162,3 +162,24 @@ def test_get_taken_slots_only_counts_active_statuses(fake_kv):
     taken = ss.get_taken_slots("2026-01-05")
     assert taken == {"15:00", "16:00"}
     assert ss.get_taken_slots("2026-01-06") == set()
+
+
+def test_customer_profile_accumulates_visits(fake_kv):
+    assert ss.get_customer_profile("u1") is None
+
+    ss.record_customer_visit("u1", "Alice", "2026-01-05")
+    profile = ss.get_customer_profile("u1")
+    assert profile == {"n": "Alice", "c": 1, "first": "2026-01-05", "last": "2026-01-05"}
+
+    ss.record_customer_visit("u1", "Alice", "2026-03-10")
+    profile = ss.get_customer_profile("u1")
+    assert profile["c"] == 2
+    assert profile["first"] == "2026-01-05"
+    assert profile["last"] == "2026-03-10"
+
+
+def test_customer_link_sig_is_stable_and_user_specific(fake_kv):
+    sig1 = ss.customer_link_sig("u1")
+    assert sig1 == ss.customer_link_sig("u1")
+    assert len(sig1) == 16
+    assert sig1 != ss.customer_link_sig("u2")

@@ -53,6 +53,7 @@ from app.services.state_service import (
     save_intake_data, get_intake_data, clear_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
     enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
+    record_customer_visit, get_customer_profile, customer_link_sig,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -286,6 +287,25 @@ def _booking_url() -> str:
     return f"{base}/booking.html" if base else ""
 
 
+def _customer_booking_url(user_id: str) -> str:
+    """帶簽章 uid 的個人化預約連結，讓網頁能顯示「歡迎回來」。"""
+    url = _booking_url()
+    if not url:
+        return ""
+    return f"{url}?uid={quote(user_id)}&sig={customer_link_sig(user_id)}"
+
+
+def _customer_status_line(user_id: str) -> str:
+    """給管理員看的客人狀態：第一次預約或回頭客（含累積次數與上次日期）。"""
+    profile = get_customer_profile(user_id)
+    if not profile:
+        return "🆕 第一次預約"
+    count = int(profile.get("c", 0))
+    last = profile.get("last", "")
+    last_label = f"，上次 {format_date_label(last)}" if last else ""
+    return f"↩️ 回頭客（已完成 {count} 次{last_label}）"
+
+
 def _admin_booking_url() -> str:
     url = _booking_url()
     if not (url and settings.admin_page_token):
@@ -340,9 +360,21 @@ def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt
     )
 
 def _reply_booking_entry_or_fallback(event):
+    user_id = event.source.user_id
     url = _booking_url()
     if url:
-        reply_flex(event, fm.booking_entry_card(url))
+        profile = get_customer_profile(user_id)
+        welcome_lines = []
+        if profile:
+            name = profile.get("n", "")
+            count = int(profile.get("c", 0))
+            last = profile.get("last", "")
+            welcome_lines = [f"✦ 歡迎回來{'，' + name if name else ''}"]
+            detail = f"這是您第 {count + 1} 次預約"
+            if last:
+                detail += f"・上次是 {format_date_label(last)}"
+            welcome_lines.append(detail)
+        reply_flex(event, fm.booking_entry_card(_customer_booking_url(user_id), welcome_lines=welcome_lines))
         return
     dates = get_next_available_dates()
     if dates:
@@ -485,9 +517,10 @@ def _cmd_booking_paid(event, user_id, text):
         ),
     )
 
-    # 完成後存入 done 區（供改期使用）
+    # 完成後存入 done 區（供改期使用），並累積顧客檔案（回頭客辨識用）
     save_done_booking(ref, booking, cal_event_id)
     delete_booking(ref)
+    record_customer_visit(ctx_user, line_display_name, booking["d"])
 
     if settings.notion_api_key:
         payload = {
@@ -975,7 +1008,8 @@ def handle_text_message(event: MessageEvent):
                 notify_admin(
                     user_id,
                     f"📅 預約申請\n"
-                    f"{date_label} {time_str}\n\n"
+                    f"{date_label} {time_str}\n"
+                    f"{_customer_status_line(user_id)}\n\n"
                     f"回覆 /ok 確認日期（會發匯款資訊）\n"
                     f"回覆 /no 婉拒",
                     reason="新預約申請",

@@ -59,3 +59,49 @@ def test_post_slots_conflict_returns_409(monkeypatch):
 
     assert res.status_code == 409
     assert res.json()["detail"]["conflicts"] == [{"date": "2026-07-12", "time": "15:00"}]
+
+
+def test_booking_html_has_loading_error_and_flow_hints(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bot_basic_id", "@botid")
+
+    res = client.get("/booking.html")
+
+    assert res.status_code == 200
+    assert 'id="status"' in res.text          # 載入中/錯誤面板
+    assert 'id="statusRetry"' in res.text     # 重新載入按鈕
+    assert 'id="legend"' in res.text          # 月曆圖例
+    assert 'id="endtime"' in res.text         # 預估結束時間
+    assert "送出後會發生什麼" in res.text      # 流程說明
+    assert 'id="welcome"' in res.text         # 回頭客歡迎橫幅
+
+
+def test_api_me_rejects_bad_signature(monkeypatch):
+    monkeypatch.setattr("app.routers.api.get_customer_profile", lambda uid: {"n": "Alice", "c": 2, "last": "2026-07-01"})
+
+    res = client.get("/api/me?uid=u1&sig=wrong")
+
+    assert res.status_code == 200
+    assert res.json() == {"ok": True, "returning": False}
+
+
+def test_api_me_returns_profile_with_valid_signature(monkeypatch):
+    from app.services.state_service import customer_link_sig
+
+    monkeypatch.setattr("app.routers.api.get_customer_profile", lambda uid: {"n": "Alice", "c": 2, "last": "2026-07-01"})
+
+    res = client.get(f"/api/me?uid=u1&sig={customer_link_sig('u1')}")
+
+    assert res.status_code == 200
+    assert res.json() == {"ok": True, "returning": True, "name": "Alice", "count": 2, "last": "2026-07-01"}
+
+
+def test_api_me_unknown_customer_is_not_returning(monkeypatch):
+    from app.services.state_service import customer_link_sig
+
+    monkeypatch.setattr("app.routers.api.get_customer_profile", lambda uid: None)
+
+    res = client.get(f"/api/me?uid=u1&sig={customer_link_sig('u1')}")
+
+    assert res.status_code == 200
+    assert res.json() == {"ok": True, "returning": False}

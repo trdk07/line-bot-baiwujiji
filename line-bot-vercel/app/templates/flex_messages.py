@@ -362,8 +362,16 @@ def booking_confirmed_card(
                     _ornament_divider(),
                     {"type": "box", "layout": "vertical", "spacing": "md", "contents": fields},
                     _ornament_divider(),
+                    _make_text("✦ 諮詢前請準備", size="sm", color=TEXT_TITLE, weight="bold"),
+                    _make_text(
+                        "・想問的問題先條列下來，諮詢會更聚焦\n"
+                        "・預留完整 60 分鐘不被打擾的時間\n"
+                        "・前一天會再收到提醒；如需改期，請提前在此告知",
+                        size="xs",
+                        color=TEXT_GREY,
+                    ),
+                    _ornament_divider(),
                     _make_text("屆時見。", size="sm", color=TEXT_TITLE, align="center"),
-                    _make_text("如需改期，直接在此告知即可", size="xxs", color=TEXT_GREY, align="center"),
                 ],
             },
         },
@@ -493,6 +501,13 @@ def intake_prompt_card(
                         "height": "sm",
                     },
                     _make_text("送出前請把範例文字改成您的資料。", size="xxs", color=TEXT_GREY, align="center"),
+                    _sep(),
+                    _make_text(
+                        "接下來：老師確認日期 → 收到匯款資訊 → 匯款回報後預約成立",
+                        size="xxs",
+                        color=TEXT_GREY,
+                        align="center",
+                    ),
                 ],
             },
         },
@@ -621,7 +636,32 @@ def time_picker_card(date_str: str, slots: list) -> dict:
     }
 
 
-def booking_entry_card(url: str) -> dict:
+def booking_entry_card(url: str, welcome_lines: list | None = None) -> dict:
+    """預約入口卡片。welcome_lines 有值時（回頭客）在說明下方插入歡迎區塊。
+
+    注意：admin_booking_link_card 依賴 body contents 的 [0]、[1]、[-1] 索引，
+    歡迎區塊只能插在中段，不能動頭尾。
+    """
+    welcome_section = []
+    if welcome_lines:
+        welcome_section = [
+            {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "xs",
+                "margin": "md",
+                "paddingAll": "12px",
+                "backgroundColor": BG_HEADER,
+                "cornerRadius": "8px",
+                "contents": [
+                    _make_text(welcome_lines[0], size="sm", color=GOLD, weight="bold", align="center"),
+                    *[
+                        _make_text(line, size="xxs", color=DIVIDER, align="center")
+                        for line in welcome_lines[1:]
+                    ],
+                ],
+            }
+        ]
     return {
         "type": "flex",
         "altText": "選擇預約時段",
@@ -649,6 +689,7 @@ def booking_entry_card(url: str) -> dict:
                 "contents": [
                     _make_text("請開啟月曆查看可預約時段。", color=TEXT_WHITE, align="center"),
                     _make_text("選好後會回到聊天室送出預約訊息。", size="xs", color=TEXT_GREY, align="center"),
+                    *welcome_section,
                     _ornament_divider(),
                     {
                         "type": "button",
@@ -798,6 +839,11 @@ def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict
                     _make_text(
                         "⚠️ 匯款完成後，請務必按下方「已匯款」按鈕通知我們，預約才算成立。",
                         color=TEXT_WHITE,
+                    ),
+                    _make_text(
+                        "回報後老師會核對收款，確認無誤就會發「預約成立」通知給您。",
+                        size="xs",
+                        color=TEXT_GREY,
                     ),
                     _make_button("✦ 已匯款", "已匯款"),
                     _make_text("百無禁忌研究所", size="xs", color=TEXT_GREY, align="center"),
