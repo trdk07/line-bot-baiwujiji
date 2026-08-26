@@ -191,6 +191,53 @@
     .booking-form button { border: 0; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
     .booking-form .delete { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
     .toast.show { opacity: 1; }
+    .status { text-align: center; color: var(--muted); padding: 56px 20px; }
+    .spin {
+      width: 30px;
+      height: 30px;
+      border: 2.5px solid var(--line);
+      border-top-color: var(--title);
+      border-radius: 50%;
+      margin: 0 auto 14px;
+      animation: sp .8s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    .retry {
+      margin-top: 14px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #FFFFFF;
+      font-weight: 700;
+      padding: 10px 26px;
+      font: inherit;
+    }
+    .welcome { max-width: 560px; margin: 14px auto -6px; padding: 0 16px; }
+    .welcome .inner {
+      background: var(--bg-header);
+      color: var(--gold);
+      border-radius: 10px;
+      padding: 10px 14px;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .welcome .sub { color: var(--line); font-size: 11px; font-weight: 400; margin-top: 2px; }
+    .legend { display: flex; justify-content: center; gap: 16px; color: var(--muted); font-size: 11px; margin-top: 10px; }
+    .legend span { display: flex; align-items: center; gap: 5px; }
+    .lg-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--gold); display: inline-block; }
+    .lg-dot.full { background: var(--line); }
+    .lg-today { width: 10px; height: 10px; border-radius: 999px; outline: 1px solid var(--gold); display: inline-block; }
+    .endtime { text-align: center; color: var(--title); font-size: 12px; margin: 2px 0 6px; min-height: 15px; }
+    .flow {
+      border-top: 1px dashed var(--line);
+      margin-top: 10px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.9;
+    }
+    .flow b { color: var(--title); }
   </style>
 </head>
 <body>
@@ -199,14 +246,27 @@
     <div class="subtitle">預約時段</div>
     <button class="edit-toggle" id="editToggle" aria-label="編輯時段"><span></span></button>
   </header>
+  <div class="welcome" id="welcome" hidden>
+    <div class="inner"><span id="welName"></span><div class="sub" id="welSub"></div></div>
+  </div>
   <main>
     <div class="month-nav">
-      <button class="nav-btn" id="prev" aria-label="上個月">‹</button>
+      <button class="nav-btn" id="prev" aria-label="上個月" disabled>‹</button>
       <div class="month-title" id="monthTitle"></div>
-      <button class="nav-btn" id="next" aria-label="下個月">›</button>
+      <button class="nav-btn" id="next" aria-label="下個月" disabled>›</button>
     </div>
     <div class="weekdays"><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div></div>
     <div class="grid" id="grid"></div>
+    <div class="legend" id="legend" hidden>
+      <span><i class="lg-dot"></i>有空檔</span>
+      <span><i class="lg-dot full"></i>已滿</span>
+      <span><i class="lg-today"></i>今天</span>
+    </div>
+    <div class="status" id="status">
+      <div class="spin" id="statusSpin"></div>
+      <div id="statusMsg">正在載入可預約時段…</div>
+      <button class="retry" id="statusRetry" hidden>重新載入</button>
+    </div>
     <div class="empty" id="empty" hidden>✦<br>本月時段尚未開放，請稍候</div>
     <section class="admin-panel" id="adminPanel">
       <div class="panel-title">進行中／已成立預約</div>
@@ -217,8 +277,16 @@
   <section class="sheet hidden" id="sheet">
     <div class="handle"></div>
     <div class="panel-title" id="panelTitle"></div>
+    <div class="hint" id="durHint">每時段諮詢 60 分鐘</div>
     <div class="chips" id="chips"></div>
+    <div class="endtime" id="endtime"></div>
     <div class="hint" id="hint">送出後老師確認日期會再通知您</div>
+    <div class="flow" id="flow" hidden>
+      <b>送出後會發生什麼</b><br>
+      ① 預約訊息回到聊天室送出，等老師確認日期<br>
+      ② 確認後您會在 LINE 收到匯款資訊<br>
+      ③ 完成匯款並回報「已匯款」，預約正式成立
+    </div>
     <button class="cta" id="cta" disabled>確認預約</button>
     <button class="save" id="save" hidden>儲存</button>
   </section>
@@ -228,6 +296,9 @@
     const qs = new URLSearchParams(location.search);
     const adminToken = qs.get("token") || "";
     const mock = qs.get("mock") === "1";
+    const meUid = qs.get("uid") || "";
+    const meSig = qs.get("sig") || "";
+    const MONTHS_AHEAD = adminToken ? 11 : 2;
     const today = new Date();
     let cursor = new Date(today.getFullYear(), today.getMonth(), 1);
     let payload = {open: {}, taken: {}, today: today.toISOString().slice(0, 10), selectableTimes: []};
@@ -249,22 +320,72 @@
       $("toast").classList.add("show");
       setTimeout(() => $("toast").classList.remove("show"), 1500);
     };
+    const endOf = (t) => {
+      const e = (parseInt(t) * 60 + Number(t.slice(3)) + 60) % 1440;
+      return `${pad(Math.floor(e / 60))}:${pad(e % 60)}`;
+    };
+    const firstOfTodayMonth = () => {
+      if (payload.today) {
+        const [y, m] = payload.today.split("-").map(Number);
+        return new Date(y, m - 1, 1);
+      }
+      return new Date(today.getFullYear(), today.getMonth(), 1);
+    };
+
+    function showLoading() {
+      $("status").hidden = false;
+      $("statusSpin").hidden = false;
+      $("statusRetry").hidden = true;
+      $("statusMsg").textContent = "正在載入可預約時段…";
+      $("empty").hidden = true;
+      $("legend").hidden = true;
+    }
+
+    function showError() {
+      $("grid").innerHTML = "";
+      $("status").hidden = false;
+      $("statusSpin").hidden = true;
+      $("statusRetry").hidden = false;
+      $("statusMsg").textContent = "連線出了點問題，時段暫時載入不了。\n請檢查網路後再試一次。";
+      $("statusMsg").style.whiteSpace = "pre-line";
+    }
 
     async function load() {
       const month = monthKey(cursor);
-      if (mock) {
-        payload = {
-          today: payload.today,
-          selectableTimes: ["13:00","14:00","15:00","16:00","20:00","21:00","22:00","23:00","00:00"],
-          open: {[`${month}-12`]: ["15:00","16:00","20:00"], [`${month}-18`]: ["14:00","15:00"]},
-          taken: {[`${month}-12`]: ["16:00"]}
-        };
-      } else {
-        const res = await fetch(`/api/slots?month=${month}`);
-        payload = await res.json();
+      showLoading();
+      try {
+        if (mock) {
+          payload = {
+            today: payload.today,
+            selectableTimes: ["13:00","14:00","15:00","16:00","20:00","21:00","22:00","23:00","00:00"],
+            open: {[`${month}-12`]: ["15:00","16:00","20:00"], [`${month}-18`]: ["14:00","15:00"]},
+            taken: {[`${month}-12`]: ["16:00"]}
+          };
+        } else {
+          const res = await fetch(`/api/slots?month=${month}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          payload = await res.json();
+        }
+        if (adminToken) await loadBookings();
+        $("status").hidden = true;
+        $("legend").hidden = false;
+        render();
+      } catch (err) {
+        showError();
       }
-      if (adminToken) await loadBookings();
-      render();
+    }
+
+    async function loadMe() {
+      if (!meUid || !meSig) return;
+      try {
+        const res = await fetch(`/api/me?uid=${encodeURIComponent(meUid)}&sig=${encodeURIComponent(meSig)}`);
+        if (!res.ok) return;
+        const me = await res.json();
+        if (!me.returning) return;
+        $("welName").textContent = `✦ 歡迎回來${me.name ? "，" + me.name : ""}`;
+        $("welSub").textContent = `這是您第 ${me.count + 1} 次預約` + (me.last ? `・上次是 ${label(me.last)}` : "");
+        $("welcome").hidden = false;
+      } catch (err) { /* 認不出回頭客就當一般訪客，不打擾 */ }
     }
 
     async function loadBookings() {
@@ -334,6 +455,10 @@
     function render() {
       const month = monthKey(cursor);
       $("monthTitle").textContent = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
+      const base = firstOfTodayMonth();
+      const maxMonth = new Date(base.getFullYear(), base.getMonth() + MONTHS_AHEAD, 1);
+      $("prev").disabled = cursor <= base;
+      $("next").disabled = cursor >= maxMonth;
       $("editToggle").style.display = adminToken ? "block" : "none";
       $("editToggle").classList.toggle("on", editing);
       $("top").classList.toggle("editing", editing);
@@ -402,6 +527,9 @@
         chips.appendChild(b);
       });
       $("hint").textContent = editing ? "已有預約的時段不可關閉" : (BOT_BASIC_ID ? "送出後老師確認日期會再通知您" : "請回聊天室輸入同樣文字完成預約");
+      $("durHint").hidden = editing;
+      $("flow").hidden = editing;
+      $("endtime").textContent = (!editing && selectedTime) ? `${selectedTime} 開始・約 ${endOf(selectedTime)} 結束` : "";
       $("cta").hidden = editing;
       $("save").hidden = !editing;
       $("cta").disabled = !selectedTime;
@@ -464,7 +592,9 @@
       $("sheet").classList.add("hidden");
       load();
     };
+    $("statusRetry").onclick = load;
     load();
+    loadMe();
   </script>
 </body>
 </html>

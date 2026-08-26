@@ -5,6 +5,7 @@ Upstash KV（httpx.post），驗證完整的管理員指令與預約流程行為
 特別是 2-3 重構（管理員指令表化）前後的行為一致性。
 """
 
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 import json
@@ -13,17 +14,28 @@ import pytest
 import linebot.v3.messaging as messaging
 
 import app.routers.webhook as wh
+from app.services.calendar_service import TW_TZ
 
-OPEN_JULY = {
-    "2026-07-12": ["15:00", "16:00"],
-    "2026-07-13": ["15:00"],
-    "2026-07-14": ["15:00"],
-    "2026-07-15": ["15:00"],
+# 開放時段改用「今天起算」的動態日期（台灣時區），
+# 避免寫死的日期過期後整批整合測試失效。
+D1, D2, D3, D4 = [
+    (datetime.now(TW_TZ).date() + timedelta(days=i)).isoformat() for i in range(1, 5)
+]
+
+OPEN_SLOTS = {
+    D1: ["15:00", "16:00"],
+    D2: ["15:00"],
+    D3: ["15:00"],
+    D4: ["15:00"],
 }
 
 
 def _seed_open_slots(env):
-    env.kv.store["open:2026-07"] = json.dumps(OPEN_JULY, ensure_ascii=False)
+    by_month = {}
+    for d, times in OPEN_SLOTS.items():
+        by_month.setdefault(d[:7], {})[d] = times
+    for month, data in by_month.items():
+        env.kv.store[f"open:{month}"] = json.dumps(data, ensure_ascii=False)
 
 
 class FakeKV:
@@ -150,7 +162,7 @@ def test_ok_with_no_pending_bookings(line_env):
 def test_ok_continues_when_payment_qr_url_missing(line_env, monkeypatch):
     monkeypatch.setattr(wh.settings, "payment_qr_image_url", "")
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.replies.clear()
     line_env.pushes.clear()
@@ -166,7 +178,7 @@ def test_ok_falls_back_to_self_hosted_qr_image(line_env, monkeypatch):
     monkeypatch.setattr(wh.settings, "payment_qr_image_url", "")
     monkeypatch.setattr(wh.settings, "public_base_url", "https://bot.example.com")
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.raw_pushes.clear()
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
@@ -186,7 +198,7 @@ def test_full_booking_lifecycle(line_env):
     assert line_env.replies[-1] == [("FLEX", "選擇預約日期")]
 
     # 選擇日期+時段 → 建立 pending 預約，通知管理員
-    wh.handle_text_message(_mk_event("預約 2026-07-12 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
     # Hybrid intake should reply with the prompt card while admin still receives booking request.
     assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
     assert "intake_step:cust1" not in line_env.kv.store
@@ -214,7 +226,7 @@ def test_full_booking_lifecycle(line_env):
     assert line_env.replies[-1] == ["📋 目前沒有任何進行中的預約。"]
 
     # /change 對已完成的預約改期
-    wh.handle_text_message(_mk_event("/change 2026-07-12 16:00", user_id="admin1"))
+    wh.handle_text_message(_mk_event(f"/change {D1} 16:00", user_id="admin1"))
     assert "已改期" in line_env.replies[-1][0]
 
 
@@ -247,7 +259,7 @@ def test_admin_booking_editor_link_requires_env(line_env, monkeypatch):
 
 def test_no_rejects_booking_and_notifies_customer(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-13 15:00", user_id="cust3"))
+    wh.handle_text_message(_mk_event(f"預約 {D2} 15:00", user_id="cust3"))
     wh.handle_text_message(_mk_event("/no", user_id="admin1"))
     assert "已婉拒" in line_env.replies[-1][0]
     assert line_env.pushes[-1][0] == "cust3"
@@ -256,7 +268,7 @@ def test_no_rejects_booking_and_notifies_customer(line_env):
 
 def test_clear_requires_confirmation(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-14 15:00", user_id="cust2"))
+    wh.handle_text_message(_mk_event(f"預約 {D3} 15:00", user_id="cust2"))
 
     wh.handle_text_message(_mk_event("/clear", user_id="admin1"))
     assert "即將清除全部 1 筆預約" in line_env.replies[-1][0]
@@ -296,7 +308,7 @@ def test_bot_off_notifies_customer_once(line_env):
 
 def test_intake_pending_captures_full_name_and_birth(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.pushes.clear()
     line_env.replies.clear()
@@ -308,7 +320,7 @@ def test_intake_pending_captures_full_name_and_birth(line_env):
 
 def test_intake_pending_rejects_placeholder_template_and_keeps_waiting(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("1. 姓名\n2. 出生年月日時\n3. 想問的問題", user_id="cust1"))
@@ -323,7 +335,7 @@ def test_intake_pending_rejects_placeholder_template_and_keeps_waiting(line_env)
 
 def test_intake_pending_rejects_incomplete_free_text_and_keeps_waiting(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("王小明 1990-01-01 想問工作", user_id="cust1"))
@@ -333,7 +345,7 @@ def test_intake_pending_rejects_incomplete_free_text_and_keeps_waiting(line_env)
 
 def test_intake_pending_does_not_swallow_other_intent(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     # 預約後客人改問服務項目，不應回分類卡；改為重發 intake 卡片，之後同類訊息靜默。
     line_env.replies.clear()
@@ -348,7 +360,7 @@ def test_booking_completion_sends_intake_prompt_card_without_step(line_env, monk
     monkeypatch.setattr(wh.settings, "bot_basic_id", "@baiwujiji")
     _seed_open_slots(line_env)
 
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     assert line_env.replies[-1] == [("FLEX", "預約申請已送出，請填寫諮詢資料")]
     flex_json = line_env.raw_replies[-1].messages[0].contents.to_dict()
@@ -359,7 +371,7 @@ def test_booking_completion_sends_intake_prompt_card_without_step(line_env, monk
 
 def test_pending_intake_form_with_keyword_question_finishes_and_clears(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01 08:00\n3. 想問感情", user_id="cust1"))
@@ -375,7 +387,7 @@ def test_pending_intake_form_with_keyword_question_finishes_and_clears(line_env)
 
 def test_pending_stepwise_birth_multiline_and_keyword_question(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
 
     wh.handle_text_message(_mk_event("王小明", user_id="cust1"))
     assert "請直接回覆出生年月日時" in line_env.replies[-1][0]
@@ -390,7 +402,7 @@ def test_pending_stepwise_birth_multiline_and_keyword_question(line_env):
 
 def test_paid_confirmation_card_uses_line_display_name_not_intake_name(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
     wh.handle_text_message(_mk_event("1. 王小明\n2. 1990-01-01 08:00\n3. 想問感情", user_id="cust1"))
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
     wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
@@ -409,14 +421,14 @@ def test_paid_confirmation_card_uses_line_display_name_not_intake_name(line_env)
 
 def test_pending_escape_payment_and_human(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
     wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
 
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
     assert "已收到您的匯款回報" in line_env.replies[-1][0]
 
-    wh.handle_text_message(_mk_event("預約 2026-07-15 16:00", user_id="cust2"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 16:00", user_id="cust2"))
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("找小夏老師", user_id="cust2"))
     assert "已經通知小夏老師" in line_env.replies[-1][0]
@@ -424,15 +436,76 @@ def test_pending_escape_payment_and_human(line_env):
 
 def test_intake_symbol_form_and_no_clear_state(line_env):
     _seed_open_slots(line_env)
-    wh.handle_text_message(_mk_event("預約 2026-07-15 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 15:00", user_id="cust1"))
     wh.handle_text_message(_mk_event("①王小明②1990-01-01③想問感情", user_id="cust1"))
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("謝謝", user_id="cust1"))
     assert line_env.replies == []
 
-    wh.handle_text_message(_mk_event("預約 2026-07-15 16:00", user_id="cust2"))
+    wh.handle_text_message(_mk_event(f"預約 {D4} 16:00", user_id="cust2"))
     wh.handle_text_message(_mk_event("王小美", user_id="cust2"))
     wh.handle_text_message(_mk_event("/no", user_id="admin1"))
     line_env.replies.clear()
     wh.handle_text_message(_mk_event("好的", user_id="cust2"))
     assert line_env.replies == []
+
+
+def test_paid_records_customer_visit_for_returning_recognition(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust9"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust9"))
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    profile = json.loads(line_env.kv.store["customer:cust9"])
+    assert profile["c"] == 1
+    assert profile["last"] == D1
+    assert profile["n"] == "User-cust9"
+
+
+def test_new_booking_notifies_admin_with_first_time_label(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+
+    assert "🆕 第一次預約" in line_env.pushes[-1][1][0]
+
+
+def test_new_booking_notifies_admin_with_returning_label(line_env):
+    _seed_open_slots(line_env)
+    line_env.kv.store["customer:cust1"] = json.dumps(
+        {"n": "User-cust1", "c": 2, "first": "2026-05-01", "last": "2026-06-20"}, ensure_ascii=False
+    )
+
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+
+    admin_msg = line_env.pushes[-1][1][0]
+    assert "↩️ 回頭客" in admin_msg
+    assert "已完成 2 次" in admin_msg
+
+
+def test_booking_entry_card_is_personalized_for_returning_customer(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr("app.routers.webhook.has_seen_principles", lambda user_id: True)
+    line_env.kv.store["customer:cust1"] = json.dumps(
+        {"n": "User-cust1", "c": 1, "first": "2026-06-20", "last": "2026-06-20"}, ensure_ascii=False
+    )
+
+    wh.handle_text_message(_mk_event("我要預約", user_id="cust1"))
+
+    assert line_env.replies[-1] == [("FLEX", "選擇預約時段")]
+    card = line_env.raw_replies[-1].messages[0].contents.to_dict()
+    flat = json.dumps(card, ensure_ascii=False)
+    assert "歡迎回來" in flat
+    assert "第 2 次預約" in flat
+    assert "uid=cust1" in flat and "sig=" in flat
+
+
+def test_booking_entry_card_has_no_welcome_for_new_customer(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr("app.routers.webhook.has_seen_principles", lambda user_id: True)
+
+    wh.handle_text_message(_mk_event("我要預約", user_id="cust1"))
+
+    card = line_env.raw_replies[-1].messages[0].contents.to_dict()
+    flat = json.dumps(card, ensure_ascii=False)
+    assert "歡迎回來" not in flat

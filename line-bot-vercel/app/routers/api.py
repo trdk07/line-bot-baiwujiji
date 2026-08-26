@@ -16,6 +16,7 @@ from app.services.slots_service import SELECTABLE_TIMES, get_open_slots, set_ope
 from app.services.state_service import (
     kv_cmd, delete_booking, delete_done_booking, get_all_done_bookings, get_all_queue_bookings,
     remove_crm_booking, update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime, clear_intake_state,
+    get_customer_profile, customer_link_sig,
 )
 from app.templates import flex_messages as fm
 
@@ -102,6 +103,27 @@ async def slots(month: str):
         "taken": get_busy_map(start, end),
         "today": datetime.now(TW_TZ).date().isoformat(),
         "selectableTimes": SELECTABLE_TIMES,
+    }
+
+
+@router.get("/api/me")
+async def me(uid: str = "", sig: str = ""):
+    """回頭客辨識：預約網頁用簽章 uid 查詢顧客累積檔案。
+
+    連結由 Bot 私訊給客人本人（含 HMAC 簽章），簽章不符或查無資料時
+    一律回 returning: false，網頁就當一般訪客顯示，不報錯。
+    """
+    if not uid or not sig or not hmac.compare_digest(sig, customer_link_sig(uid)):
+        return {"ok": True, "returning": False}
+    profile = get_customer_profile(uid)
+    if not profile:
+        return {"ok": True, "returning": False}
+    return {
+        "ok": True,
+        "returning": True,
+        "name": profile.get("n", ""),
+        "count": int(profile.get("c", 0)),
+        "last": profile.get("last", ""),
     }
 
 

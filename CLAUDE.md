@@ -62,9 +62,14 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `intake_pending:{user_id}` | 是否等待填寫諮詢資料 | 24 小時 |
 | `intake_data:{user_id}` | 諮詢資料 JSON `{b: 生日, q: 問題}` | 30 天 |
 | `clear_confirm_pending` | `/clear` 二次確認狀態 | 60 秒 |
+| `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
 
 `booking` JSON 欄位：`d`=日期、`t`=時段、`n`=客戶顯示名稱、`s`=狀態
 （`pending`/`awaiting_payment`/`payment_reported`/`done`）。
+
+`customer` 檔案在管理員 `/paid` 完成預約時累積（次數 +1、更新最近日期），
+用於：預約入口卡片的「歡迎回來」、管理員通知的「第一次預約／回頭客」標註、
+以及預約網頁 `/api/me`（簽章 uid 連結）顯示的歡迎橫幅。
 
 所有 KV 操作都收斂在 `state_service.kv_cmd()` / `kv_get()` / `_pipeline()`，
 新增狀態時直接複用這幾個底層函式即可。
