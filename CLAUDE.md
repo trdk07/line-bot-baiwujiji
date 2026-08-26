@@ -69,6 +69,7 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `clear_confirm_pending` | `/clear` 二次確認狀態 | 60 秒 |
 | `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
 | `order_seq:{year}` | 對外訂單編號年度流水號（INCR） | 無 |
+| `stats:{YYYY-MM}:{field}` | 月度彙總（`new`/`done`/`released`，INCR，儀表板用） | 無（永久累積） |
 
 `booking` JSON 欄位：`d`=日期、`t`=時段、`n`=客戶顯示名稱、`s`=狀態
 （`pending`/`awaiting_payment`/`payment_reported`/`done`）、`o`=對外訂單編號
@@ -94,6 +95,7 @@ intake 攔截的逃逸名單包含此意圖。
 | `/list` | 顯示所有進行中預約總覽 |
 | `/clear` → `/clear yes` | 清除全部進行中預約（60 秒內二次確認） |
 | `/change [編號] YYYY-MM-DD HH:MM` | 改期（進行中或已完成的預約皆可） |
+| `/admin`（或「管理後台」） | 取得管理後台總覽頁連結（`admin.html`：進行中預約、月度統計） |
 | `/myid` | 查詢自己的 LINE User ID（非管理員也可用） |
 
 指令實作為 `webhook.py` 中的 `_cmd_*` 函式，統一透過 `ADMIN_COMMANDS`

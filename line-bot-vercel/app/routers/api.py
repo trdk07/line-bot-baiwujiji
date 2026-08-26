@@ -18,6 +18,7 @@ from app.services.state_service import (
     kv_cmd, delete_booking, delete_done_booking, get_all_done_bookings, get_all_queue_bookings,
     remove_crm_booking, update_booking_datetime, update_done_booking_datetime, update_crm_booking_datetime, clear_intake_state,
     get_customer_profile, customer_link_sig,
+    incr_monthly_stat, get_monthly_stats,
 )
 from app.templates import flex_messages as fm
 
@@ -122,6 +123,7 @@ def sweep_stale_bookings(now_ts: int | None = None) -> dict:
             if waited > PAY_RELEASE_SECS:
                 delete_booking(ref)
                 clear_intake_state(user_id)
+                incr_monthly_stat("released")
                 push_text_to_user(
                     user_id,
                     f"您的預約 {label} 因久未收到匯款回報，已自動取消，時段已釋放。\n\n"
@@ -154,6 +156,37 @@ async def booking_page():
     html = Path(__file__).resolve().parents[1].joinpath("templates", "booking.html").read_text(encoding="utf-8")
     html = html.replace("__BOT_BASIC_ID__", json.dumps(settings.bot_basic_id))
     return HTMLResponse(html)
+
+
+@router.get("/admin.html", response_class=HTMLResponse)
+async def admin_page():
+    """管理後台總覽頁。頁面本身公開伺服，資料端點（/api/stats、/api/bookings）驗 token。"""
+    html = Path(__file__).resolve().parents[1].joinpath("templates", "admin.html").read_text(encoding="utf-8")
+    return HTMLResponse(html)
+
+
+@router.get("/api/stats")
+async def stats(token: str = ""):
+    """儀表板數據：近 6 個月彙總 + 目前進行中各狀態筆數。"""
+    _assert_admin_token(token)
+    now = datetime.now(TW_TZ)
+    months = []
+    y, m = now.year, now.month
+    for _ in range(6):
+        months.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    active_counts = {"pending": 0, "awaiting_payment": 0, "payment_reported": 0}
+    for e in get_all_queue_bookings():
+        s = e["booking"].get("s", "")
+        if s in active_counts:
+            active_counts[s] += 1
+    return {
+        "months": get_monthly_stats(months),  # 由新到舊
+        "active": active_counts,
+        "doneRecent": len(get_all_done_bookings()),  # 30 天內已成立
+    }
 
 
 @router.get("/qr-payment.png")

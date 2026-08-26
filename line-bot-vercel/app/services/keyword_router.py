@@ -22,6 +22,7 @@ KEYWORD_PATTERNS = [
     (r"^/change\b", "booking_change"),
     (r"^/crm\b", "crm"),
     (r"^/booking-admin$|^設定時段$", "booking_admin"),
+    (r"^/admin$|^管理後台$", "admin_dashboard"),
     (r"^/myid$", "get_my_id"),
     (r"^填寫諮詢資料$|^填資料$|^諮詢資料格式$", "intake_help"),
 

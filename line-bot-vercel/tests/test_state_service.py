@@ -202,3 +202,15 @@ def test_save_booking_assigns_order_no(fake_kv):
     assert order_no.startswith("B-")
     booking = ss.get_queue_bookings_by_status("pending")[0]["booking"]
     assert booking["o"] == order_no
+
+
+def test_monthly_stats_accumulate_and_read_back(fake_kv):
+    ss.incr_monthly_stat("new")
+    ss.incr_monthly_stat("new")
+    ss.incr_monthly_stat("done")
+    month = next(k for k in fake_kv.store if k.startswith("stats:")).split(":")[1]
+
+    rows = ss.get_monthly_stats([month, "2000-01"])
+
+    assert rows[0] == {"month": month, "new": 2, "done": 1, "released": 0}
+    assert rows[1] == {"month": "2000-01", "new": 0, "done": 0, "released": 0}

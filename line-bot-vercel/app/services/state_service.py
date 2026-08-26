@@ -197,6 +197,7 @@ def save_booking(user_id: str, date_str: str, time_str: str, user_name: str) -> 
         ["SET", f"booking:{ref}", data],
         ["RPUSH", "booking_queue", ref],
     ])
+    incr_monthly_stat("new")
     return order_no
 
 
@@ -544,6 +545,38 @@ def customer_link_sig(user_id: str) -> str:
 
     secret = get_settings().line_channel_secret.encode("utf-8")
     return hmac_mod.new(secret, f"me:{user_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+
+# ============================================================
+# 月度彙總（儀表板用，永久保存）
+# ============================================================
+# KV key: stats:{YYYY-MM}:{field}，各自用 INCR 原子遞增。
+# 欄位：new=新預約申請、done=完成預約（/paid）、released=逾時自動釋放。
+# done: 紀錄只留 30 天，這裡的彙總是儀表板歷史數字的永久來源。
+
+STAT_FIELDS = ["new", "done", "released"]
+
+
+def incr_monthly_stat(field: str):
+    """當月統計 +1。KV 未設定時靜默略過。"""
+    month = datetime.now(_TW_TZ).strftime("%Y-%m")
+    kv_cmd("INCR", f"stats:{month}:{field}")
+
+
+def get_monthly_stats(months: list) -> list:
+    """批次取得多個月份的彙總數字。回傳 [{"month": "2026-08", "new": 3, ...}, ...]。"""
+    if not months:
+        return []
+    commands = [["GET", f"stats:{m}:{f}"] for m in months for f in STAT_FIELDS]
+    raws = _pipeline(commands)
+    results = []
+    for i, month in enumerate(months):
+        row = {"month": month}
+        for j, field in enumerate(STAT_FIELDS):
+            raw = raws[i * len(STAT_FIELDS) + j]
+            row[field] = int(raw) if raw else 0
+        results.append(row)
+    return results
 
 
 CRM_QUEUE_TTL = 7 * 24 * 60 * 60

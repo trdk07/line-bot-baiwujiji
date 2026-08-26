@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>百無禁忌研究所｜管理後台</title>
+  <style>
+    :root {
+      --bg: #EFEBE5;
+      --bg-header: #3D1F1F;
+      --gold: #C2A68C;
+      --title: #7B3F2A;
+      --ink: #4A453C;
+      --muted: #6E675E;
+      --line: #C8B8A8;
+      --accent: #8B2020;
+      --sheet: #FAF8F4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, "PingFang TC", sans-serif;
+    }
+    header {
+      background: var(--bg-header);
+      color: var(--gold);
+      text-align: center;
+      padding: 18px 16px 14px;
+    }
+    h1, .sec-title { font-family: "Noto Serif TC", "Songti TC", "PMingLiU", serif; }
+    h1 { margin: 0; font-size: 20px; }
+    .subtitle { margin-top: 3px; color: var(--line); font-size: 12px; }
+    main { max-width: 720px; margin: 0 auto; padding: 18px 16px 60px; }
+    .sec-title {
+      color: var(--title);
+      font-weight: 700;
+      font-size: 16px;
+      margin: 22px 0 10px;
+    }
+    .sec-title::before { content: "✦"; color: var(--gold); font-size: 11px; margin-right: 8px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .stat {
+      background: var(--sheet);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .stat .num { font-size: 26px; font-weight: 700; color: var(--title); }
+    .stat .num.warn { color: #8A6A2E; }
+    .stat .lbl { font-size: 12px; color: var(--muted); margin-top: 3px; }
+    table { width: 100%; border-collapse: collapse; background: var(--sheet); border-radius: 12px; overflow: hidden; }
+    th, td { padding: 10px 12px; font-size: 13px; text-align: left; border-top: 1px solid var(--line); }
+    th { background: #F1EAE0; color: var(--muted); font-weight: 500; border-top: 0; }
+    td.n { font-variant-numeric: tabular-nums; }
+    .booking-row { background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
+    .booking-row .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .badge { font-size: 11px; border-radius: 999px; padding: 2px 9px; background: #F1EAE0; color: var(--muted); margin-left: 6px; }
+    .badge.pending { background: #F6EBD3; color: #8A6A2E; }
+    .badge.awaiting_payment { background: #EFE1E1; color: var(--accent); }
+    .badge.payment_reported { background: #E3EBE3; color: #3F5A48; }
+    .empty { text-align: center; color: var(--muted); padding: 26px; }
+    .status { text-align: center; color: var(--muted); padding: 56px 20px; }
+    .spin {
+      width: 30px; height: 30px;
+      border: 2.5px solid var(--line); border-top-color: var(--title);
+      border-radius: 50%; margin: 0 auto 14px;
+      animation: sp .8s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    .retry, .link-btn {
+      display: inline-block;
+      border: 0; border-radius: 8px;
+      background: var(--accent); color: #FFF;
+      font-weight: 700; font-size: 14px;
+      padding: 11px 22px; margin-top: 10px;
+      text-decoration: none; font-family: inherit; cursor: pointer;
+    }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>百無禁忌研究所</h1>
+    <div class="subtitle">管理後台</div>
+  </header>
+  <main>
+    <div class="status" id="status">
+      <div class="spin" id="statusSpin"></div>
+      <div id="statusMsg">正在載入…</div>
+      <button class="retry" id="statusRetry" hidden>重新載入</button>
+    </div>
+
+    <div id="content" hidden>
+      <div class="sec-title">進行中</div>
+      <div class="cards">
+        <div class="stat"><div class="num warn" id="cPending">0</div><div class="lbl">⏳ 待確認日期</div></div>
+        <div class="stat"><div class="num warn" id="cAwait">0</div><div class="lbl">💳 待匯款</div></div>
+        <div class="stat"><div class="num warn" id="cReported">0</div><div class="lbl">💰 已回報待確認</div></div>
+        <div class="stat"><div class="num" id="cDone30">0</div><div class="lbl">✅ 已成立（30 天內）</div></div>
+      </div>
+
+      <div class="sec-title">本月</div>
+      <div class="cards">
+        <div class="stat"><div class="num" id="mNew">0</div><div class="lbl">新預約申請</div></div>
+        <div class="stat"><div class="num" id="mDone">0</div><div class="lbl">完成預約</div></div>
+        <div class="stat"><div class="num" id="mReleased">0</div><div class="lbl">逾時自動釋放</div></div>
+      </div>
+
+      <div class="sec-title">近 6 個月</div>
+      <table>
+        <thead><tr><th>月份</th><th>新申請</th><th>成立</th><th>逾時釋放</th></tr></thead>
+        <tbody id="monthRows"></tbody>
+      </table>
+
+      <div class="sec-title">進行中預約</div>
+      <div id="bookingList"></div>
+      <a class="link-btn" id="calendarLink" href="#">開啟預約月曆（改期／刪除／設定時段）</a>
+      <div class="hint">此頁為唯讀總覽；改期、刪除、開關時段請用預約月曆的管理模式。連結含管理 token，請勿轉傳。</div>
+    </div>
+  </main>
+  <script>
+    const qs = new URLSearchParams(location.search);
+    const token = qs.get("token") || "";
+    const $ = (id) => document.getElementById(id);
+    const STATUS_LABEL = {pending: "⏳ 待確認", awaiting_payment: "💳 待匯款", payment_reported: "💰 已回報"};
+
+    function escapeHtml(value) {
+      return String(value || "").replace(/[&<>'"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+    }
+
+    function showError(msg) {
+      $("statusSpin").hidden = true;
+      $("statusRetry").hidden = false;
+      $("statusMsg").textContent = msg;
+    }
+
+    async function load() {
+      $("status").hidden = false;
+      $("statusSpin").hidden = false;
+      $("statusRetry").hidden = true;
+      $("statusMsg").textContent = "正在載入…";
+      if (!token) {
+        showError("缺少管理 token。請從 LINE 的管理連結開啟本頁。");
+        $("statusRetry").hidden = true;
+        return;
+      }
+      try {
+        const [statsRes, bookingsRes] = await Promise.all([
+          fetch(`/api/stats?token=${encodeURIComponent(token)}`),
+          fetch(`/api/bookings?token=${encodeURIComponent(token)}`),
+        ]);
+        if (statsRes.status === 403 || bookingsRes.status === 403) {
+          showError("管理 token 不正確。");
+          $("statusRetry").hidden = true;
+          return;
+        }
+        if (!statsRes.ok || !bookingsRes.ok) throw new Error("load failed");
+        render(await statsRes.json(), (await bookingsRes.json()).bookings || []);
+        $("status").hidden = true;
+        $("content").hidden = false;
+      } catch (err) {
+        showError("連線出了點問題，請再試一次。");
+      }
+    }
+
+    function render(stats, bookings) {
+      $("cPending").textContent = stats.active.pending;
+      $("cAwait").textContent = stats.active.awaiting_payment;
+      $("cReported").textContent = stats.active.payment_reported;
+      $("cDone30").textContent = stats.doneRecent;
+
+      const current = stats.months[0] || {new: 0, done: 0, released: 0};
+      $("mNew").textContent = current.new;
+      $("mDone").textContent = current.done;
+      $("mReleased").textContent = current.released;
+
+      $("monthRows").innerHTML = stats.months.map((m) => `
+        <tr><td>${escapeHtml(m.month)}</td><td class="n">${m.new}</td><td class="n">${m.done}</td><td class="n">${m.released}</td></tr>`).join("");
+
+      const active = bookings.filter((b) => b.status !== "done");
+      $("bookingList").innerHTML = active.length ? active.map((b) => `
+        <div class="booking-row">
+          <strong>${escapeHtml(b.name || "未命名")}</strong>
+          <span class="badge ${escapeHtml(b.status)}">${escapeHtml(STATUS_LABEL[b.status] || b.status)}</span>
+          <div class="meta">${escapeHtml(b.date)} ${escapeHtml(b.time)}</div>
+        </div>`).join("") : `<div class="empty">目前沒有進行中的預約</div>`;
+
+      $("calendarLink").href = `/booking.html?token=${encodeURIComponent(token)}`;
+    }
+
+    $("statusRetry").onclick = load;
+    load();
+  </script>
+</body>
+</html>

@@ -54,6 +54,7 @@ from app.services.state_service import (
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
     enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
     record_customer_visit, get_customer_profile, customer_link_sig,
+    incr_monthly_stat,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
@@ -420,6 +421,16 @@ def _cmd_booking_admin(event, user_id, text):
     reply_flex(event, fm.admin_booking_link_card(url, "設定可預約時段"))
 
 
+def _cmd_admin_dashboard(event, user_id, text):
+    """發送管理後台總覽頁連結（進行中預約、月度統計）。"""
+    base = settings.public_base_url.rstrip("/")
+    if not (base and settings.admin_page_token):
+        reply_text(event, "尚未設定 PUBLIC_BASE_URL 或 ADMIN_PAGE_TOKEN，暫時無法產生後台連結。")
+        return
+    url = f"{base}/admin.html?token={settings.admin_page_token}"
+    reply_text(event, f"✦ 管理後台\n{url}\n\n此連結含管理 token，請勿轉傳。")
+
+
 def _cmd_booking_ok(event, user_id, text):
     """確認日期可以 → 自動發匯款資訊給客人。"""
     num = _parse_booking_number(text)
@@ -534,10 +545,11 @@ def _cmd_booking_paid(event, user_id, text):
         ),
     )
 
-    # 完成後存入 done 區（供改期使用），並累積顧客檔案（回頭客辨識用）
+    # 完成後存入 done 區（供改期使用），並累積顧客檔案與月度統計
     save_done_booking(ref, booking, cal_event_id)
     delete_booking(ref)
     record_customer_visit(ctx_user, line_display_name, booking["d"])
+    incr_monthly_stat("done")
 
     if settings.notion_api_key:
         payload = {
@@ -775,6 +787,7 @@ ADMIN_COMMANDS = {
     "booking_change": _cmd_booking_change,
     "crm": _cmd_crm,
     "booking_admin": _cmd_booking_admin,
+    "admin_dashboard": _cmd_admin_dashboard,
 }
 
 

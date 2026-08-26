@@ -670,3 +670,37 @@ def test_update_booking_status_stamps_transition_time(line_env):
     booking = json.loads(line_env.kv.store[booking_key])
     assert booking["s"] == "awaiting_payment"
     assert abs(booking["u"] - _time.time()) < 60
+
+
+def test_booking_and_paid_accumulate_monthly_stats(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    stats = {k: v for k, v in line_env.kv.store.items() if k.startswith("stats:")}
+    month = next(iter(stats)).split(":")[1]
+    assert line_env.kv.store[f"stats:{month}:new"] == "1"
+    assert line_env.kv.store[f"stats:{month}:done"] == "1"
+
+
+def test_sweep_release_counts_into_monthly_stats(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "awaiting_payment", 80 * 3600, now, updated_secs_ago=73 * 3600)
+
+    sweep_stale_bookings(now)
+
+    month = next(k for k in line_env.kv.store if k.startswith("stats:")).split(":")[1]
+    assert line_env.kv.store[f"stats:{month}:released"] == "1"
+
+
+def test_admin_dashboard_command_sends_link(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret-token")
+
+    wh.handle_text_message(_mk_event("/admin", user_id="admin1"))
+    assert "https://example.com/admin.html?token=secret-token" in line_env.replies[-1][0]
+
+    wh.handle_text_message(_mk_event("管理後台", user_id="cust1"))
+    assert line_env.replies[-1] == ["只有管理員可以使用這個指令。"]
