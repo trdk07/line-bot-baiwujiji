@@ -59,6 +59,13 @@ POSITIVE_CASES = [
     ("我要預約", "booking"),
     ("想預約", "booking"),
 
+    # --- 進度查詢 ---
+    ("進度查詢", "order_status"),
+    ("查詢進度", "order_status"),
+    ("我的預約", "order_status"),
+    ("預約查詢", "order_status"),
+    ("訂單", "order_status"),
+
     # --- 諮詢說明 / 服務分類（順序敏感，見 NEGATIVE_CASES）---
     ("什麼是諮詢", "what_is_consultation"),
     ("為什麼要先諮詢", "what_is_consultation"),
@@ -88,6 +95,9 @@ PRIORITY_CASES = [
     ("招財項目", "category_wealth"),   # 不應被 services 的「項目」搶先
     ("感情項目", "category_love"),      # 同上
     ("人生困惑諮詢", "category_consultation"),  # 不應被 what_is_consultation 誤判
+    ("我的預約", "order_status"),       # 不應被 booking 的「預約」搶先
+    ("預約查詢", "order_status"),       # 同上
+    ("我要預約", "booking"),            # 反向確認：純預約意圖不被 order_status 攔截
 ]
 
 NEGATIVE_CASES = [

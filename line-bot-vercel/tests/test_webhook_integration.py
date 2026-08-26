@@ -60,6 +60,10 @@ class FakeKV:
             before = len(s)
             s.add(cmd[2])
             return len(s) - before
+        if op == "INCR":
+            val = int(self.store.get(cmd[1], 0)) + 1
+            self.store[cmd[1]] = str(val)
+            return val
         if op == "SISMEMBER":
             s = self.store.get(cmd[1], set())
             return 1 if cmd[2] in s else 0
@@ -509,3 +513,64 @@ def test_booking_entry_card_has_no_welcome_for_new_customer(line_env, monkeypatc
     card = line_env.raw_replies[-1].messages[0].contents.to_dict()
     flat = json.dumps(card, ensure_ascii=False)
     assert "歡迎回來" not in flat
+
+
+def test_booking_gets_order_no_and_admin_sees_it(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    booking = json.loads(line_env.kv.store[booking_key])
+    assert booking["o"].startswith("B-")
+    assert f"編號 {booking['o']}" in line_env.pushes[-1][1][0]
+
+    # /list 也要顯示編號
+    wh.handle_text_message(_mk_event("/list", user_id="admin1"))
+    assert booking["o"] in line_env.replies[-1][0]
+
+
+def test_order_status_query_lists_customer_bookings(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D2} 15:00", user_id="cust2"))
+
+    # intake_pending 中也能查詢（逃逸名單）
+    wh.handle_text_message(_mk_event("進度查詢", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", "預約進度查詢")]
+    card = line_env.raw_replies[-1].messages[0].contents.to_dict()
+    flat = json.dumps(card, ensure_ascii=False)
+    booking_key = next(k for k in line_env.kv.store if "cust1" in k and k.startswith("booking:"))
+    my_order = json.loads(line_env.kv.store[booking_key])["o"]
+    assert my_order in flat
+    # 只列自己的，不能看到別人的預約
+    other_key = next(k for k in line_env.kv.store if "cust2" in k and k.startswith("booking:"))
+    other_order = json.loads(line_env.kv.store[other_key])["o"]
+    assert other_order not in flat
+    assert "等待老師確認日期" in flat
+
+
+def test_order_status_query_without_bookings(line_env):
+    wh.handle_text_message(_mk_event("我的預約", user_id="cust1"))
+    assert "目前沒有查得到的預約紀錄" in line_env.replies[-1][0]
+
+
+def test_confirmed_card_includes_order_no(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    order_no = json.loads(line_env.kv.store[booking_key])["o"]
+
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    line_env.raw_pushes.clear()
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    confirmed = next(p for p in line_env.raw_pushes if p.to == "cust1")
+    flat = json.dumps(confirmed.messages[0].contents.to_dict(), ensure_ascii=False)
+    assert order_no in flat
+
+    # done 之後進度查詢仍查得到，狀態顯示為預約成立
+    wh.handle_text_message(_mk_event("進度查詢", user_id="cust1"))
+    flat = json.dumps(line_env.raw_replies[-1].messages[0].contents.to_dict(), ensure_ascii=False)
+    assert order_no in flat
+    assert "預約成立" in flat

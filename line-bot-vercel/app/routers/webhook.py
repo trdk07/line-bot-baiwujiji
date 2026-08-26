@@ -347,7 +347,7 @@ def _intake_prefill_url() -> str:
     return f"https://line.me/R/oaMessage/{settings.bot_basic_id}/?{quote(INTAKE_TEMPLATE_TEXT)}"
 
 
-def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt_text: str = INTAKE_PROMPT_TEXT):
+def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt_text: str = INTAKE_PROMPT_TEXT, order_no: str = ""):
     reply_flex(
         event,
         fm.intake_prompt_card(
@@ -356,8 +356,24 @@ def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt
             date_label=date_label,
             time_str=time_str,
             prefill_url=_intake_prefill_url(),
+            order_no=order_no,
         ),
     )
+
+
+def _reply_order_status(event, user_id: str):
+    """客人查詢自己所有進行中與已成立（30 天內）預約的進度。"""
+    entries = [
+        e for e in get_all_queue_bookings() + get_all_done_bookings()
+        if e["user_id"] == user_id
+    ]
+    if not entries:
+        reply_text(
+            event,
+            "目前沒有查得到的預約紀錄。\n\n如需預約，請輸入「我要預約」。",
+        )
+        return
+    reply_flex(event, fm.order_status_card([e["booking"] for e in entries]))
 
 def _reply_booking_entry_or_fallback(event):
     user_id = event.source.user_id
@@ -514,6 +530,7 @@ def _cmd_booking_paid(event, user_id, text):
         fm.booking_confirmed_card(
             line_display_name, date_label, booking["t"],
             birth_date=intake_birth, question=intake_question,
+            order_no=booking.get("o", ""),
         ),
     )
 
@@ -570,7 +587,8 @@ def _cmd_booking_list(event, user_id, text):
         b = e["booking"]
         date_label = format_date_label(b["d"])
         status = STATUS_LABEL.get(b["s"], b["s"])
-        lines.append(f"  {i}. {b['n']}｜{date_label} {b['t']}｜{status}")
+        order_part = f"｜{b['o']}" if b.get("o") else ""
+        lines.append(f"  {i}. {b['n']}｜{date_label} {b['t']}｜{status}{order_part}")
     reply_text(event, "\n".join(lines))
 
 
@@ -843,7 +861,8 @@ def handle_text_message(event: MessageEvent):
             return
 
     # === 諮詢資料填寫攔截（優先於關鍵字比對）===
-    if not is_admin(user_id) and intake_pending and intent not in {"human", "payment_reported"}:
+    # order_status 也放行：客人剛預約完最常想查的就是進度，不能被攔截吃掉。
+    if not is_admin(user_id) and intake_pending and intent not in {"human", "payment_reported", "order_status"}:
         if intent in {"intake_help"}:
             _reply_intake_prompt(event)
             return
@@ -897,6 +916,11 @@ def handle_text_message(event: MessageEvent):
 
         if intent == "intake_help":
             _reply_intake_prompt(event)
+            return
+
+        # 進度查詢：列出該客人所有預約的目前狀態
+        if intent == "order_status":
+            _reply_order_status(event, user_id)
             return
 
         # 找小夏老師
@@ -994,21 +1018,23 @@ def handle_text_message(event: MessageEvent):
                     reply_text(event, "這個時段目前無法預約，請輸入「我要預約」重新選擇。")
                     return
 
-                # 儲存預約（狀態：pending，等管理員確認日期）
-                save_booking(user_id, date_str, time_str, user_name)
+                # 儲存預約（狀態：pending，等管理員確認日期），取得對外訂單編號
+                order_no = save_booking(user_id, date_str, time_str, user_name)
 
                 # 標記等待填寫諮詢資料（24 小時有效），先以模板卡片引導；逐步問答作為 fallback。
                 clear_intake_state(user_id)
                 set_intake_pending(user_id)
 
                 # 回覆客人：模板卡片 + deep link 預填格式
-                _reply_intake_prompt(event, date_label, time_str)
+                _reply_intake_prompt(event, date_label, time_str, order_no=order_no)
 
                 # 通知管理員
+                order_line = f"編號 {order_no}\n" if order_no else ""
                 notify_admin(
                     user_id,
                     f"📅 預約申請\n"
                     f"{date_label} {time_str}\n"
+                    f"{order_line}"
                     f"{_customer_status_line(user_id)}\n\n"
                     f"回覆 /ok 確認日期（會發匯款資訊）\n"
                     f"回覆 /no 婉拒",

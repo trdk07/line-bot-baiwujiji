@@ -12,6 +12,7 @@
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -158,22 +159,45 @@ def set_seen_principles(user_id: str):
 # 預約管理（支援同一用戶多筆預約）
 # ============================================================
 # KV key:   booking:{user_id|booking_id}  (booking_id = 毫秒時間戳)
-# KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
+# KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending", "o": "B-2026-0012"}
 #
 # booking_queue: 預約佇列（Redis List），存放 ref（user_id|booking_id），按時間順序
 
-def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
-    """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。"""
+_TW_TZ = timezone(timedelta(hours=8))
+
+ORDER_PREFIX_BOOKING = "B"  # 預約諮詢；未來點燈 L、法會 F 共用同一組流水號
+
+
+def next_order_no(prefix: str = ORDER_PREFIX_BOOKING) -> str:
+    """產生對外訂單編號（例如 B-2026-0012），給客人看與對帳用。
+
+    以年度流水號遞增（KV INCR，原子操作不會重號）；KV 未設定時回傳空字串，
+    呼叫端一律以「有值才顯示」處理。
+    """
+    year = datetime.now(_TW_TZ).year
+    seq = kv_cmd("INCR", f"order_seq:{year}")
+    if seq is None:
+        return ""
+    return f"{prefix}-{year}-{int(seq):04d}"
+
+
+def save_booking(user_id: str, date_str: str, time_str: str, user_name: str) -> str:
+    """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。
+
+    回傳對外訂單編號（KV 未設定時為空字串）。
+    """
     booking_id = str(int(time.time() * 1000))
     ref = f"{user_id}|{booking_id}"
-    data = json.dumps(
-        {"d": date_str, "t": time_str, "n": user_name, "s": "pending"},
-        ensure_ascii=False,
-    )
+    order_no = next_order_no()
+    booking = {"d": date_str, "t": time_str, "n": user_name, "s": "pending"}
+    if order_no:
+        booking["o"] = order_no
+    data = json.dumps(booking, ensure_ascii=False)
     _pipeline([
         ["SET", f"booking:{ref}", data],
         ["RPUSH", "booking_queue", ref],
     ])
+    return order_no
 
 
 def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:

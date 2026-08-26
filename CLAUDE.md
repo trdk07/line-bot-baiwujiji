@@ -63,9 +63,13 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `intake_data:{user_id}` | 諮詢資料 JSON `{b: 生日, q: 問題}` | 30 天 |
 | `clear_confirm_pending` | `/clear` 二次確認狀態 | 60 秒 |
 | `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
+| `order_seq:{year}` | 對外訂單編號年度流水號（INCR） | 無 |
 
 `booking` JSON 欄位：`d`=日期、`t`=時段、`n`=客戶顯示名稱、`s`=狀態
-（`pending`/`awaiting_payment`/`payment_reported`/`done`）。
+（`pending`/`awaiting_payment`/`payment_reported`/`done`）、`o`=對外訂單編號
+（`B-{年}-{4位流水號}`，前綴 B=預約諮詢，未來點燈 L／法會 F 共用同一組流水號）。
+客人輸入「進度查詢」（`order_status` 意圖）可查自己所有進行中與已成立預約的狀態，
+intake 攔截的逃逸名單包含此意圖。
 
 `customer` 檔案在管理員 `/paid` 完成預約時累積（次數 +1、更新最近日期），
 用於：預約入口卡片的「歡迎回來」、管理員通知的「第一次預約／回頭客」標註、
