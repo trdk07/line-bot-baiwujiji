@@ -514,13 +514,48 @@ def get_taken_slots(date_str: str) -> set:
 # 讓 Bot 與預約網頁能認出回頭客（歡迎回來、第 N 次、上次日期）。
 
 def record_customer_visit(user_id: str, name: str, date_str: str):
-    """預約完成（/paid）時累積顧客檔案：次數 +1、更新最近預約日期。"""
+    """預約完成（/paid）時累積顧客檔案：次數 +1、更新最近預約日期。
+
+    同時把 user_id 加進 customer_index（Set），讓後台的顧客名冊
+    可以列出所有累積過的顧客（Redis 無法用前綴撈 key，需自建索引）。
+    """
     profile = get_customer_profile(user_id) or {}
     profile["n"] = name or profile.get("n", "")
     profile["c"] = int(profile.get("c", 0)) + 1
     profile.setdefault("first", date_str)
     profile["last"] = date_str
-    kv_cmd("SET", f"customer:{user_id}", json.dumps(profile, ensure_ascii=False))
+    _pipeline([
+        ["SET", f"customer:{user_id}", json.dumps(profile, ensure_ascii=False)],
+        ["SADD", "customer_index", user_id],
+    ])
+
+
+def get_all_customers() -> list:
+    """後台顧客名冊：所有累積過的顧客檔案，按最近預約日期新到舊排序。
+
+    回傳 [{"u": user_id, "n": 名稱, "c": 次數, "first": ..., "last": ...}, ...]。
+    """
+    user_ids = kv_cmd("SMEMBERS", "customer_index") or []
+    if not user_ids:
+        return []
+    raws = _pipeline([["GET", f"customer:{uid}"] for uid in user_ids])
+    customers = []
+    for uid, raw in zip(user_ids, raws):
+        if not raw:
+            continue
+        try:
+            profile = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        customers.append({
+            "u": uid,
+            "n": profile.get("n", ""),
+            "c": int(profile.get("c", 0)),
+            "first": profile.get("first", ""),
+            "last": profile.get("last", ""),
+        })
+    customers.sort(key=lambda item: item["last"], reverse=True)
+    return customers
 
 
 def get_customer_profile(user_id: str) -> dict | None:

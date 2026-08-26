@@ -66,6 +66,8 @@ class FakeKV:
             val = int(self.store.get(cmd[1], 0)) + 1
             self.store[cmd[1]] = str(val)
             return val
+        if op == "SMEMBERS":
+            return sorted(self.store.get(cmd[1], set()))
         if op == "SISMEMBER":
             s = self.store.get(cmd[1], set())
             return 1 if cmd[2] in s else 0

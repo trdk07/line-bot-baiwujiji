@@ -38,6 +38,8 @@ class FakeKV:
             val = int(self.store.get(cmd[1], 0)) + 1
             self.store[cmd[1]] = str(val)
             return val
+        if op == "SMEMBERS":
+            return sorted(self.store.get(cmd[1], set()))
         if op == "SISMEMBER":
             s = self.store.get(cmd[1], set())
             return 1 if cmd[2] in s else 0
@@ -216,3 +218,15 @@ def test_monthly_stats_accumulate_and_read_back(fake_kv):
 
     assert rows[0] == {"month": month, "new": 2, "done": 1, "released": 0}
     assert rows[1] == {"month": "2000-01", "new": 0, "done": 0, "released": 0}
+
+
+def test_customer_roster_lists_all_sorted_by_last_visit(fake_kv):
+    assert ss.get_all_customers() == []
+
+    ss.record_customer_visit("u1", "Alice", "2026-01-05")
+    ss.record_customer_visit("u2", "Bob", "2026-03-10")
+    ss.record_customer_visit("u1", "Alice", "2026-02-01")
+
+    roster = ss.get_all_customers()
+    assert [c["u"] for c in roster] == ["u2", "u1"]  # 最近優先
+    assert roster[1] == {"u": "u1", "n": "Alice", "c": 2, "first": "2026-01-05", "last": "2026-02-01"}

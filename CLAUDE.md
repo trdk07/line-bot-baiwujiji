@@ -68,6 +68,7 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `intake_data:{user_id}` | 諮詢資料 JSON `{b: 生日, q: 問題}` | 30 天 |
 | `clear_confirm_pending` | `/clear` 二次確認狀態 | 60 秒 |
 | `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
+| `customer_index` | Set，所有累積過的顧客 user_id（後台顧客名冊用索引） | 無 |
 | `order_seq:{year}` | 對外訂單編號年度流水號（INCR） | 無 |
 | `stats:{YYYY-MM}:{field}` | 月度彙總（`new`/`done`/`released`，INCR，儀表板用） | 無（永久累積） |
 
@@ -95,7 +96,8 @@ intake 攔截的逃逸名單包含此意圖。
 | `/list` | 顯示所有進行中預約總覽 |
 | `/clear` → `/clear yes` | 清除全部進行中預約（60 秒內二次確認） |
 | `/change [編號] YYYY-MM-DD HH:MM` | 改期（進行中或已完成的預約皆可） |
-| `/admin`（或「管理後台」） | 取得管理後台總覽頁連結（`admin.html`：進行中預約、月度統計） |
+| `/admin`（或「管理後台」） | 取得管理後台總覽頁連結（`admin.html`：進行中預約、月度統計、顧客名冊） |
+| `/myid` | 查詢自己的 LINE User ID（非管理員也可用） |
 
 管理後台安全機制：`admin.html` 需帶有效 token 或 session cookie 才伺服；
 首次以 token 開啟會經 `POST /api/admin/login` 換成 7 天效期的 HttpOnly 簽章
@@ -104,7 +106,6 @@ cookie（無狀態，金鑰由 LINE channel secret＋`ADMIN_PAGE_TOKEN` 衍生�
 同一 IP 15 分鐘內驗證失敗 10 次鎖定（`authfail:{ip}`，KV 未設定時不鎖）。
 後台的「確認日期／婉拒／確認收款」按鈕與 LINE 指令 `/ok` `/no` `/paid`
 共用 `services/booking_actions.py` 的核心邏輯（雙軌等價）。
-| `/myid` | 查詢自己的 LINE User ID（非管理員也可用） |
 
 指令實作為 `webhook.py` 中的 `_cmd_*` 函式，統一透過 `ADMIN_COMMANDS`
 對照表分派，入口只做一次 `is_admin()` 檢查。
@@ -148,6 +149,7 @@ GitHub Actions（`.github/workflows/tests.yml`）在 push/PR 時自動執行。
 
 ## 部署
 
-Vercel serverless function，`vercel.json` 用 `rewrites` 把所有路徑導到
-`api/index.py`（該檔案 re-export `app.main:app`，Vercel 對 `api/` 目錄下的
-Python 檔案會自動偵測為 function）。
+Vercel 以 FastAPI framework preset 偵測本專案，所有路徑自動導入
+`app.main:app`（`api/index.py` re-export 該 app）。`vercel.json` 只保留
+cron 設定——**不可再加 catch-all rewrite**：Vercel 已改為把「改寫後的
+目的路徑」傳給 app，catch-all rewrite 會讓所有路由 404（2026-08 事故）。
