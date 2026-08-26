@@ -316,6 +316,71 @@ def _info_row(icon: str, text: str) -> dict:
 
 
 # ============================================================
+# 進度查詢卡片（客人輸入「進度查詢」時顯示）
+# ============================================================
+ORDER_STATUS_INFO = {
+    "pending": ("⏳", "等待老師確認日期"),
+    "awaiting_payment": ("💳", "待匯款，完成後請回報「已匯款」"),
+    "payment_reported": ("💰", "已回報匯款，等待老師確認"),
+    "done": ("✅", "預約成立"),
+}
+
+
+def _order_status_entry(booking: dict) -> dict:
+    d = datetime.strptime(booking["d"], "%Y-%m-%d")
+    date_label = f"{d.month}/{d.day}（{WEEKDAY_NAMES[d.weekday()]}）"
+    icon, status_text = ORDER_STATUS_INFO.get(booking.get("s", ""), ("・", booking.get("s", "")))
+    return {
+        "type": "box",
+        "layout": "vertical",
+        "spacing": "xs",
+        "paddingAll": "12px",
+        "backgroundColor": "#F7F3EC",
+        "cornerRadius": "8px",
+        "contents": [
+            _make_text(booking.get("o") or "（無編號）", size="xs", color=GOLD, weight="bold"),
+            _make_text(f"📅 {date_label}  {booking['t']}", size="md", color=TEXT_WHITE, weight="bold"),
+            _make_text(f"{icon} {status_text}", size="sm", color=TEXT_TITLE),
+        ],
+    }
+
+
+def order_status_card(bookings: list) -> dict:
+    """列出該客人所有進行中與已成立（30 天內）的預約進度。"""
+    return {
+        "type": "flex",
+        "altText": "預約進度查詢",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text("✦ 預約進度", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xxs", color=DIVIDER, align="center"),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    *[_order_status_entry(b) for b in bookings],
+                    _make_text("狀態有變動時會主動通知您，如有疑問可輸入「找老師」。", size="xxs", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
 # 預約確認卡片（管理員 /paid 後發給客人）
 # ============================================================
 def booking_confirmed_card(
@@ -324,8 +389,11 @@ def booking_confirmed_card(
     time_str: str,
     birth_date: str = "",
     question: str = "",
+    order_no: str = "",
 ) -> dict:
     fields = [_field("大名", customer_name)]
+    if order_no:
+        fields.insert(0, _field("預約編號", order_no))
     if birth_date:
         fields.append(_field("生辰", birth_date))
     if question:
@@ -462,6 +530,7 @@ def intake_prompt_card(
     date_label: str = "",
     time_str: str = "",
     prefill_url: str = "",
+    order_no: str = "",
 ) -> dict:
     """預約送出後，引導顧客用固定格式填寫諮詢資料。"""
     button_action = (
@@ -473,6 +542,7 @@ def intake_prompt_card(
     if date_label and time_str:
         details = [
             _make_text(f"📅 {date_label}  {time_str}", size="md", color=TEXT_WHITE, align="center"),
+            *([_make_text(f"預約編號 {order_no}・輸入「進度查詢」可隨時查看狀態", size="xxs", color=TEXT_GREY, align="center")] if order_no else []),
             _sep(),
         ]
     return {

@@ -43,6 +43,11 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 
 - 任一狀態下管理員可用 `/no` 婉拒（刪除預約，通知客人）
 - `/change` 可對進行中或已完成（`done`）的預約改期
+- **逾時掃描**（每日 cron `sweep_stale_bookings`，先提醒後釋放）：
+  `pending` 超過 24 小時提醒管理員處理（每 48 小時再提醒）；
+  `awaiting_payment` 超過 48 小時提醒客人匯款（一次）、超過 72 小時
+  自動取消並釋放時段（通知雙方）；`payment_reported` 永不自動取消。
+  狀態變更時間存於 booking JSON 的 `u` 欄位（epoch 秒）。
 - **軟鎖定**：`calendar_service.get_available_slots()` 會把 `pending` /
   `awaiting_payment` / `payment_reported` 狀態的預約時段也視為佔用，
   避免管理員確認收款、建立日曆事件前，該時段被其他客人重複預約
@@ -63,9 +68,14 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `intake_data:{user_id}` | 諮詢資料 JSON `{b: 生日, q: 問題}` | 30 天 |
 | `clear_confirm_pending` | `/clear` 二次確認狀態 | 60 秒 |
 | `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
+| `order_seq:{year}` | 對外訂單編號年度流水號（INCR） | 無 |
+| `stats:{YYYY-MM}:{field}` | 月度彙總（`new`/`done`/`released`，INCR，儀表板用） | 無（永久累積） |
 
 `booking` JSON 欄位：`d`=日期、`t`=時段、`n`=客戶顯示名稱、`s`=狀態
-（`pending`/`awaiting_payment`/`payment_reported`/`done`）。
+（`pending`/`awaiting_payment`/`payment_reported`/`done`）、`o`=對外訂單編號
+（`B-{年}-{4位流水號}`，前綴 B=預約諮詢，未來點燈 L／法會 F 共用同一組流水號）。
+客人輸入「進度查詢」（`order_status` 意圖）可查自己所有進行中與已成立預約的狀態，
+intake 攔截的逃逸名單包含此意圖。
 
 `customer` 檔案在管理員 `/paid` 完成預約時累積（次數 +1、更新最近日期），
 用於：預約入口卡片的「歡迎回來」、管理員通知的「第一次預約／回頭客」標註、
@@ -85,6 +95,15 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `/list` | 顯示所有進行中預約總覽 |
 | `/clear` → `/clear yes` | 清除全部進行中預約（60 秒內二次確認） |
 | `/change [編號] YYYY-MM-DD HH:MM` | 改期（進行中或已完成的預約皆可） |
+| `/admin`（或「管理後台」） | 取得管理後台總覽頁連結（`admin.html`：進行中預約、月度統計） |
+
+管理後台安全機制：`admin.html` 需帶有效 token 或 session cookie 才伺服；
+首次以 token 開啟會經 `POST /api/admin/login` 換成 7 天效期的 HttpOnly 簽章
+cookie（無狀態，金鑰由 LINE channel secret＋`ADMIN_PAGE_TOKEN` 衍生，
+換掉 `ADMIN_PAGE_TOKEN` 即全部失效），並把 token 從網址列清除。
+同一 IP 15 分鐘內驗證失敗 10 次鎖定（`authfail:{ip}`，KV 未設定時不鎖）。
+後台的「確認日期／婉拒／確認收款」按鈕與 LINE 指令 `/ok` `/no` `/paid`
+共用 `services/booking_actions.py` 的核心邏輯（雙軌等價）。
 | `/myid` | 查詢自己的 LINE User ID（非管理員也可用） |
 
 指令實作為 `webhook.py` 中的 `_cmd_*` 函式，統一透過 `ADMIN_COMMANDS`

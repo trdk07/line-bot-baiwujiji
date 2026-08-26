@@ -22,6 +22,7 @@ KEYWORD_PATTERNS = [
     (r"^/change\b", "booking_change"),
     (r"^/crm\b", "crm"),
     (r"^/booking-admin$|^設定時段$", "booking_admin"),
+    (r"^/admin$|^管理後台$", "admin_dashboard"),
     (r"^/myid$", "get_my_id"),
     (r"^填寫諮詢資料$|^填資料$|^諮詢資料格式$", "intake_help"),
 
@@ -35,6 +36,9 @@ KEYWORD_PATTERNS = [
 
     # --- 匯款回報（放在預約流程前面）---
     (r"已匯款|已轉帳|匯好了|轉好了|已付款", "payment_reported"),
+
+    # --- 進度查詢（放在「預約」之前，避免「我的預約」「預約查詢」被 booking 搶先匹配）---
+    (r"進度|我的預約|查詢預約|預約查詢|訂單", "order_status"),
 
     # --- 預約流程（放在 booking 前面，優先比對日期格式）---
     (r"^預約\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", "booking_confirm"),

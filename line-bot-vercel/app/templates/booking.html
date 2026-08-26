@@ -298,7 +298,32 @@
     const mock = qs.get("mock") === "1";
     const meUid = qs.get("uid") || "";
     const meSig = qs.get("sig") || "";
-    const MONTHS_AHEAD = adminToken ? 11 : 2;
+    let isAdmin = Boolean(adminToken);
+    const monthsAhead = () => (isAdmin ? 11 : 2);
+
+    // 管理模式驗證：帶 token 開啟時換成 HttpOnly cookie 並清掉網址上的 token；
+    // 沒帶 token 時探測 cookie session（老師書籤不含 token 也能進管理模式）。
+    async function probeAdmin() {
+      if (adminToken) {
+        try {
+          const res = await fetch("/api/admin/login", {
+            method: "POST",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({token: adminToken}),
+          });
+          if (res.ok) {
+            qs.delete("token");
+            const rest = qs.toString();
+            history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : ""));
+          }
+        } catch (err) { /* 換不到 cookie 就繼續用網址 token */ }
+        return;
+      }
+      try {
+        const res = await fetch("/api/admin/me");
+        if (res.ok && (await res.json()).admin) isAdmin = true;
+      } catch (err) { /* 一般訪客 */ }
+    }
     const today = new Date();
     let cursor = new Date(today.getFullYear(), today.getMonth(), 1);
     let payload = {open: {}, taken: {}, today: today.toISOString().slice(0, 10), selectableTimes: []};
@@ -366,7 +391,7 @@
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           payload = await res.json();
         }
-        if (adminToken) await loadBookings();
+        if (isAdmin) await loadBookings();
         $("status").hidden = true;
         $("legend").hidden = false;
         render();
@@ -394,9 +419,9 @@
     }
 
     function renderBookings() {
-      $("adminPanel").classList.toggle("show", Boolean(adminToken));
+      $("adminPanel").classList.toggle("show", isAdmin);
       const list = $("bookingList");
-      if (!adminToken) return;
+      if (!isAdmin) return;
       if (!bookings.length) {
         list.innerHTML = `<div class="empty" style="padding:20px">目前沒有任何預約</div>`;
         return;
@@ -456,10 +481,10 @@
       const month = monthKey(cursor);
       $("monthTitle").textContent = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
       const base = firstOfTodayMonth();
-      const maxMonth = new Date(base.getFullYear(), base.getMonth() + MONTHS_AHEAD, 1);
+      const maxMonth = new Date(base.getFullYear(), base.getMonth() + monthsAhead(), 1);
       $("prev").disabled = cursor <= base;
       $("next").disabled = cursor >= maxMonth;
-      $("editToggle").style.display = adminToken ? "block" : "none";
+      $("editToggle").style.display = isAdmin ? "block" : "none";
       $("editToggle").classList.toggle("on", editing);
       $("top").classList.toggle("editing", editing);
       renderBookings();
@@ -551,8 +576,30 @@
       drawChips();
     }
 
-    $("cta").onclick = () => {
+    $("cta").onclick = async () => {
       const msg = `預約 ${selectedDate} ${selectedTime}`;
+      // 送出前重新確認時段還在：客人可能在頁面停留很久，時段已被別人訂走。
+      // 驗證失敗（網路問題）就照原樣送出，後端 booking_confirm 還會再擋一次。
+      if (!mock) {
+        $("cta").disabled = true;
+        try {
+          const res = await fetch(`/api/slots?month=${monthKey(cursor)}`);
+          if (res.ok) {
+            const fresh = await res.json();
+            const stillOpen = (fresh.open[selectedDate] || []).includes(selectedTime);
+            const nowBusy = new Set(fresh.taken[selectedDate] || []).has(selectedTime);
+            payload = fresh;
+            if (!stillOpen || nowBusy) {
+              selectedTime = "";
+              drawChips();
+              render();
+              toast("這個時段剛被預約走了，請重選一個 🙏");
+              return;
+            }
+          }
+        } catch (err) { /* 交給後端擋 */ }
+        finally { $("cta").disabled = !selectedTime; }
+      }
       if (!BOT_BASIC_ID) {
         toast(`請回聊天室輸入：${msg}`);
         return;
@@ -593,7 +640,7 @@
       load();
     };
     $("statusRetry").onclick = load;
-    load();
+    probeAdmin().then(load);
     loadMe();
   </script>
 </body>

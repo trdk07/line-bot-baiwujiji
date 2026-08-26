@@ -105,3 +105,98 @@ def test_api_me_unknown_customer_is_not_returning(monkeypatch):
 
     assert res.status_code == 200
     assert res.json() == {"ok": True, "returning": False}
+
+
+def test_admin_page_requires_auth(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+
+    assert client.get("/admin.html").status_code == 403
+
+    res = client.get("/admin.html?token=secret")
+    assert res.status_code == 200
+    assert 'id="monthRows"' in res.text
+    assert res.headers["cache-control"] == "no-store"
+
+
+def test_api_stats_requires_token(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+
+    assert client.get("/api/stats?token=wrong").status_code == 403
+
+
+def test_api_stats_returns_months_and_active_counts(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+    monkeypatch.setattr(
+        "app.routers.api.get_monthly_stats",
+        lambda months: [{"month": m, "new": 0, "done": 0, "released": 0} for m in months],
+    )
+    monkeypatch.setattr(
+        "app.routers.api.get_all_queue_bookings",
+        lambda: [
+            {"ref": "u1|1", "user_id": "u1", "booking": {"s": "pending"}},
+            {"ref": "u2|2", "user_id": "u2", "booking": {"s": "awaiting_payment"}},
+            {"ref": "u3|3", "user_id": "u3", "booking": {"s": "pending"}},
+        ],
+    )
+    monkeypatch.setattr("app.routers.api.get_all_done_bookings", lambda: [{"ref": "u4|4"}])
+
+    res = client.get("/api/stats?token=secret")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data["months"]) == 6
+    assert data["active"] == {"pending": 2, "awaiting_payment": 1, "payment_reported": 0}
+    assert data["doneRecent"] == 1
+
+
+def test_admin_login_sets_cookie_and_allows_cookie_only_access(monkeypatch):
+    from fastapi.testclient import TestClient as TC
+    from app.main import app as _app
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+    https = TC(_app, base_url="https://testserver")
+
+    assert https.post("/api/admin/login", json={"token": "wrong"}).status_code == 403
+
+    res = https.post("/api/admin/login", json={"token": "secret"})
+    assert res.status_code == 200
+    assert "admin_session" in res.cookies
+
+    # 之後不帶 token，靠 cookie 通過
+    assert https.get("/api/stats").status_code == 200
+    assert https.get("/admin.html").status_code == 200
+    assert https.get("/api/admin/me").json() == {"admin": True}
+
+
+def test_admin_me_probe_is_false_for_visitors():
+    assert client.get("/api/admin/me").json() == {"admin": False}
+
+
+def test_auth_lockout_after_repeated_failures(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+
+    store = {}
+
+    def fake_kv(*args):
+        op = args[0]
+        if op == "GET":
+            return store.get(args[1])
+        if op == "INCR":
+            store[args[1]] = int(store.get(args[1], 0)) + 1
+            return store[args[1]]
+        if op == "EXPIRE":
+            return 1
+        return None
+
+    monkeypatch.setattr("app.routers.api.kv_cmd", fake_kv)
+
+    for _ in range(10):
+        assert client.get("/api/stats?token=wrong").status_code == 403
+    # 第 11 次起連正確 token 都擋（同 IP 鎖定 15 分鐘）
+    assert client.get("/api/stats?token=wrong").status_code == 429
+    assert client.get("/api/stats?token=secret").status_code == 429

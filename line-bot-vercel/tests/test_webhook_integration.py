@@ -60,6 +60,12 @@ class FakeKV:
             before = len(s)
             s.add(cmd[2])
             return len(s) - before
+        if op == "EXPIRE":
+            return 1 if cmd[1] in self.store else 0
+        if op == "INCR":
+            val = int(self.store.get(cmd[1], 0)) + 1
+            self.store[cmd[1]] = str(val)
+            return val
         if op == "SISMEMBER":
             s = self.store.get(cmd[1], set())
             return 1 if cmd[2] in s else 0
@@ -509,3 +515,270 @@ def test_booking_entry_card_has_no_welcome_for_new_customer(line_env, monkeypatc
     card = line_env.raw_replies[-1].messages[0].contents.to_dict()
     flat = json.dumps(card, ensure_ascii=False)
     assert "歡迎回來" not in flat
+
+
+def test_booking_gets_order_no_and_admin_sees_it(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    booking = json.loads(line_env.kv.store[booking_key])
+    assert booking["o"].startswith("B-")
+    assert f"編號 {booking['o']}" in line_env.pushes[-1][1][0]
+
+    # /list 也要顯示編號
+    wh.handle_text_message(_mk_event("/list", user_id="admin1"))
+    assert booking["o"] in line_env.replies[-1][0]
+
+
+def test_order_status_query_lists_customer_bookings(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event(f"預約 {D2} 15:00", user_id="cust2"))
+
+    # intake_pending 中也能查詢（逃逸名單）
+    wh.handle_text_message(_mk_event("進度查詢", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", "預約進度查詢")]
+    card = line_env.raw_replies[-1].messages[0].contents.to_dict()
+    flat = json.dumps(card, ensure_ascii=False)
+    booking_key = next(k for k in line_env.kv.store if "cust1" in k and k.startswith("booking:"))
+    my_order = json.loads(line_env.kv.store[booking_key])["o"]
+    assert my_order in flat
+    # 只列自己的，不能看到別人的預約
+    other_key = next(k for k in line_env.kv.store if "cust2" in k and k.startswith("booking:"))
+    other_order = json.loads(line_env.kv.store[other_key])["o"]
+    assert other_order not in flat
+    assert "等待老師確認日期" in flat
+
+
+def test_order_status_query_without_bookings(line_env):
+    wh.handle_text_message(_mk_event("我的預約", user_id="cust1"))
+    assert "目前沒有查得到的預約紀錄" in line_env.replies[-1][0]
+
+
+def test_confirmed_card_includes_order_no(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    order_no = json.loads(line_env.kv.store[booking_key])["o"]
+
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    line_env.raw_pushes.clear()
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    confirmed = next(p for p in line_env.raw_pushes if p.to == "cust1")
+    flat = json.dumps(confirmed.messages[0].contents.to_dict(), ensure_ascii=False)
+    assert order_no in flat
+
+    # done 之後進度查詢仍查得到，狀態顯示為預約成立
+    wh.handle_text_message(_mk_event("進度查詢", user_id="cust1"))
+    flat = json.dumps(line_env.raw_replies[-1].messages[0].contents.to_dict(), ensure_ascii=False)
+    assert order_no in flat
+    assert "預約成立" in flat
+
+
+# ============================================================
+# 逾時預約掃描（sweep_stale_bookings）
+# ============================================================
+import time as _time
+
+from app.routers.api import sweep_stale_bookings
+
+
+def _seed_stale_booking(env, user_id, status, created_secs_ago, now, updated_secs_ago=None):
+    ref = f"{user_id}|{int((now - created_secs_ago) * 1000)}"
+    booking = {"d": D1, "t": "15:00", "n": f"User-{user_id}", "s": status, "o": "B-2026-0099"}
+    if updated_secs_ago is not None:
+        booking["u"] = now - updated_secs_ago
+    env.kv.store[f"booking:{ref}"] = json.dumps(booking, ensure_ascii=False)
+    env.kv.store.setdefault("booking_queue", []).append(ref)
+    return ref
+
+
+def test_sweep_reminds_admin_for_stale_pending_once(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "pending", 25 * 3600, now)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 1, "customer_reminded": 0, "released": 0}
+    target, msgs = line_env.pushes[-1]
+    assert target == "admin1"
+    assert "還沒確認" in msgs[0]
+    assert "B-2026-0099" in msgs[0]
+
+    # 鎖住後同一次不重複提醒
+    assert sweep_stale_bookings(now)["admin_reminded"] == 0
+
+
+def test_sweep_ignores_fresh_bookings(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "pending", 2 * 3600, now)
+    _seed_stale_booking(line_env, "cust2", "awaiting_payment", 30 * 3600, now, updated_secs_ago=3 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 0}
+    assert line_env.pushes == []
+
+
+def test_sweep_reminds_customer_awaiting_payment_after_48h(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "awaiting_payment", 60 * 3600, now, updated_secs_ago=49 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 1, "released": 0}
+    target, msgs = line_env.pushes[-1]
+    assert target == "cust1"
+    assert "仍在等待匯款" in msgs[0]
+    assert f"booking:{ref}" in line_env.kv.store  # 預約還在，只是提醒
+
+    assert sweep_stale_bookings(now)["customer_reminded"] == 0  # 只提醒一次
+
+
+def test_sweep_releases_awaiting_payment_after_72h(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "awaiting_payment", 80 * 3600, now, updated_secs_ago=73 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 1}
+    assert f"booking:{ref}" not in line_env.kv.store
+    assert line_env.kv.store.get("booking_queue", []) == []
+    targets = [t for t, _ in line_env.pushes]
+    assert "cust1" in targets and "admin1" in targets
+    customer_msg = next(m for t, m in line_env.pushes if t == "cust1")[0]
+    assert "已自動取消" in customer_msg
+
+
+def test_sweep_never_releases_payment_reported(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "payment_reported", 200 * 3600, now, updated_secs_ago=150 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 0}
+    assert f"booking:{ref}" in line_env.kv.store
+
+
+def test_update_booking_status_stamps_transition_time(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    booking = json.loads(line_env.kv.store[booking_key])
+    assert booking["s"] == "awaiting_payment"
+    assert abs(booking["u"] - _time.time()) < 60
+
+
+def test_booking_and_paid_accumulate_monthly_stats(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/paid", user_id="admin1"))
+
+    stats = {k: v for k, v in line_env.kv.store.items() if k.startswith("stats:")}
+    month = next(iter(stats)).split(":")[1]
+    assert line_env.kv.store[f"stats:{month}:new"] == "1"
+    assert line_env.kv.store[f"stats:{month}:done"] == "1"
+
+
+def test_sweep_release_counts_into_monthly_stats(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "awaiting_payment", 80 * 3600, now, updated_secs_ago=73 * 3600)
+
+    sweep_stale_bookings(now)
+
+    month = next(k for k in line_env.kv.store if k.startswith("stats:")).split(":")[1]
+    assert line_env.kv.store[f"stats:{month}:released"] == "1"
+
+
+def test_admin_dashboard_command_sends_link(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://example.com")
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret-token")
+
+    wh.handle_text_message(_mk_event("/admin", user_id="admin1"))
+    assert "https://example.com/admin.html?token=secret-token" in line_env.replies[-1][0]
+
+    wh.handle_text_message(_mk_event("管理後台", user_id="cust1"))
+    assert line_env.replies[-1] == ["只有管理員可以使用這個指令。"]
+
+
+# ============================================================
+# 後台操作按鈕（/api/bookings/confirm、reject、paid）
+# ============================================================
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def _api(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret")
+    return TestClient(app, base_url="https://testserver")
+
+
+def _first_booking_ref(env):
+    return next(k for k in env.kv.store if k.startswith("booking:")).removeprefix("booking:")
+
+
+def test_admin_api_confirm_matches_line_ok(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["notified"] is True
+    assert line_env.pushes == [("cust1", [("FLEX", "匯款資訊 — 預約日期已確認")])]
+    assert json.loads(line_env.kv.store[f"booking:{ref}"])["s"] == "awaiting_payment"
+
+    # 已不是 pending，重按一次 → 404
+    assert api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"}).status_code == 404
+
+
+def test_admin_api_paid_completes_booking(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"})
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/paid", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    flex_alts = [a for t, msgs in line_env.pushes if t == "cust1" for kind, a in msgs if kind == "FLEX"]
+    assert any("預約成立" in a for a in flex_alts)
+    assert f"booking:{ref}" not in line_env.kv.store
+    assert f"done:{ref}" in line_env.kv.store
+    assert json.loads(line_env.kv.store["customer:cust1"])["c"] == 1
+
+
+def test_admin_api_reject_notifies_and_deletes(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/reject", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    assert f"booking:{ref}" not in line_env.kv.store
+    target, msgs = line_env.pushes[-1]
+    assert target == "cust1"
+    assert "無法安排" in msgs[0]
+
+
+def test_admin_api_actions_require_auth(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    res = api.post("/api/bookings/confirm", json={"ref": "x|1", "token": "wrong"})
+    assert res.status_code == 403

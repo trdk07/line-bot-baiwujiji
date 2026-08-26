@@ -32,6 +32,12 @@ class FakeKV:
             before = len(s)
             s.add(cmd[2])
             return len(s) - before
+        if op == "EXPIRE":
+            return 1 if cmd[1] in self.store else 0
+        if op == "INCR":
+            val = int(self.store.get(cmd[1], 0)) + 1
+            self.store[cmd[1]] = str(val)
+            return val
         if op == "SISMEMBER":
             s = self.store.get(cmd[1], set())
             return 1 if cmd[2] in s else 0
@@ -183,3 +189,30 @@ def test_customer_link_sig_is_stable_and_user_specific(fake_kv):
     assert sig1 == ss.customer_link_sig("u1")
     assert len(sig1) == 16
     assert sig1 != ss.customer_link_sig("u2")
+
+
+def test_next_order_no_increments_per_year(fake_kv):
+    first = ss.next_order_no()
+    second = ss.next_order_no()
+    year = list(fake_kv.store)[0].split(":")[1]
+    assert first == f"B-{year}-0001"
+    assert second == f"B-{year}-0002"
+
+
+def test_save_booking_assigns_order_no(fake_kv):
+    order_no = ss.save_booking("u1", "2026-01-05", "15:00", "Alice")
+    assert order_no.startswith("B-")
+    booking = ss.get_queue_bookings_by_status("pending")[0]["booking"]
+    assert booking["o"] == order_no
+
+
+def test_monthly_stats_accumulate_and_read_back(fake_kv):
+    ss.incr_monthly_stat("new")
+    ss.incr_monthly_stat("new")
+    ss.incr_monthly_stat("done")
+    month = next(k for k in fake_kv.store if k.startswith("stats:")).split(":")[1]
+
+    rows = ss.get_monthly_stats([month, "2000-01"])
+
+    assert rows[0] == {"month": month, "new": 2, "done": 1, "released": 0}
+    assert rows[1] == {"month": "2000-01", "new": 0, "done": 0, "released": 0}

@@ -12,6 +12,7 @@
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -158,22 +159,46 @@ def set_seen_principles(user_id: str):
 # 預約管理（支援同一用戶多筆預約）
 # ============================================================
 # KV key:   booking:{user_id|booking_id}  (booking_id = 毫秒時間戳)
-# KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending"}
+# KV value:  JSON {"d": "2026-03-15", "t": "14:00", "n": "小明", "s": "pending", "o": "B-2026-0012"}
 #
 # booking_queue: 預約佇列（Redis List），存放 ref（user_id|booking_id），按時間順序
 
-def save_booking(user_id: str, date_str: str, time_str: str, user_name: str):
-    """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。"""
+_TW_TZ = timezone(timedelta(hours=8))
+
+ORDER_PREFIX_BOOKING = "B"  # 預約諮詢；未來點燈 L、法會 F 共用同一組流水號
+
+
+def next_order_no(prefix: str = ORDER_PREFIX_BOOKING) -> str:
+    """產生對外訂單編號（例如 B-2026-0012），給客人看與對帳用。
+
+    以年度流水號遞增（KV INCR，原子操作不會重號）；KV 未設定時回傳空字串，
+    呼叫端一律以「有值才顯示」處理。
+    """
+    year = datetime.now(_TW_TZ).year
+    seq = kv_cmd("INCR", f"order_seq:{year}")
+    if seq is None:
+        return ""
+    return f"{prefix}-{year}-{int(seq):04d}"
+
+
+def save_booking(user_id: str, date_str: str, time_str: str, user_name: str) -> str:
+    """儲存新預約（狀態：pending）並加入佇列。每筆預約有獨立 key。
+
+    回傳對外訂單編號（KV 未設定時為空字串）。
+    """
     booking_id = str(int(time.time() * 1000))
     ref = f"{user_id}|{booking_id}"
-    data = json.dumps(
-        {"d": date_str, "t": time_str, "n": user_name, "s": "pending"},
-        ensure_ascii=False,
-    )
+    order_no = next_order_no()
+    booking = {"d": date_str, "t": time_str, "n": user_name, "s": "pending"}
+    if order_no:
+        booking["o"] = order_no
+    data = json.dumps(booking, ensure_ascii=False)
     _pipeline([
         ["SET", f"booking:{ref}", data],
         ["RPUSH", "booking_queue", ref],
     ])
+    incr_monthly_stat("new")
+    return order_no
 
 
 def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
@@ -193,6 +218,7 @@ def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
             return False
 
     booking["s"] = status
+    booking["u"] = int(time.time())  # 狀態變更時間，供逾時掃描（cron）計算等待時長
     data = json.dumps(booking, ensure_ascii=False)
     return kv_cmd("SET", f"booking:{ref}", data) == "OK"
 
@@ -519,6 +545,38 @@ def customer_link_sig(user_id: str) -> str:
 
     secret = get_settings().line_channel_secret.encode("utf-8")
     return hmac_mod.new(secret, f"me:{user_id}".encode("utf-8"), hashlib.sha256).hexdigest()[:16]
+
+
+# ============================================================
+# 月度彙總（儀表板用，永久保存）
+# ============================================================
+# KV key: stats:{YYYY-MM}:{field}，各自用 INCR 原子遞增。
+# 欄位：new=新預約申請、done=完成預約（/paid）、released=逾時自動釋放。
+# done: 紀錄只留 30 天，這裡的彙總是儀表板歷史數字的永久來源。
+
+STAT_FIELDS = ["new", "done", "released"]
+
+
+def incr_monthly_stat(field: str):
+    """當月統計 +1。KV 未設定時靜默略過。"""
+    month = datetime.now(_TW_TZ).strftime("%Y-%m")
+    kv_cmd("INCR", f"stats:{month}:{field}")
+
+
+def get_monthly_stats(months: list) -> list:
+    """批次取得多個月份的彙總數字。回傳 [{"month": "2026-08", "new": 3, ...}, ...]。"""
+    if not months:
+        return []
+    commands = [["GET", f"stats:{m}:{f}"] for m in months for f in STAT_FIELDS]
+    raws = _pipeline(commands)
+    results = []
+    for i, month in enumerate(months):
+        row = {"month": month}
+        for j, field in enumerate(STAT_FIELDS):
+            raw = raws[i * len(STAT_FIELDS) + j]
+            row[field] = int(raw) if raw else 0
+        results.append(row)
+    return results
 
 
 CRM_QUEUE_TTL = 7 * 24 * 60 * 60
