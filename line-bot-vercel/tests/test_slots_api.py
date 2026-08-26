@@ -200,3 +200,34 @@ def test_auth_lockout_after_repeated_failures(monkeypatch):
     # 第 11 次起連正確 token 都擋（同 IP 鎖定 15 分鐘）
     assert client.get("/api/stats?token=wrong").status_code == 429
     assert client.get("/api/stats?token=secret").status_code == 429
+
+
+def test_api_customers_requires_token(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+
+    assert client.get("/api/customers?token=wrong").status_code == 403
+
+
+def test_api_customers_returns_roster(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+    roster = [{"u": "u1", "n": "Alice", "c": 2, "first": "2026-01-05", "last": "2026-02-01"}]
+    monkeypatch.setattr("app.routers.api.get_all_customers", lambda: roster)
+
+    res = client.get("/api/customers?token=secret")
+
+    assert res.status_code == 200
+    assert res.json() == {"customers": roster}
+
+
+def test_admin_pages_have_roster_and_back_link(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "admin_page_token", "secret")
+
+    admin_html = client.get("/admin.html?token=secret").text
+    assert 'id="customerRows"' in admin_html      # 顧客名冊
+    assert "/api/customers" in admin_html
+
+    booking_html = client.get("/booking.html").text
+    assert 'id="backAdmin"' in booking_html        # 管理模式的返回後台連結
