@@ -1,8 +1,5 @@
 {
   "crons": [
     { "path": "/api/cron", "schedule": "0 13 * * *" }
-  ],
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index.py" }
   ]
 }
