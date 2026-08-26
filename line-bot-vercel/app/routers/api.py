@@ -1,6 +1,7 @@
 import hmac
 import json
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -62,6 +63,86 @@ def due_notifications(today, open_next_month: bool, tomorrow_bookings: list) -> 
 
 def _lock(name: str, date_key: str) -> bool:
     return kv_cmd("SET", f"reminder:{name}:{date_key}", "1", "NX", "EX", 172800) == "OK"
+
+
+# ============================================================
+# 逾時預約掃描（每日 cron）：先提醒、後釋放
+# ============================================================
+# - pending 超過 24 小時：提醒老師處理（/ok 或 /no）。鎖 48 小時後到期，
+#   老師一直沒處理就每兩天再提醒一次，預約本身不會被自動取消。
+# - awaiting_payment 超過 48 小時：提醒客人匯款（一次），並預告再未回報
+#   將自動釋放時段。
+# - awaiting_payment 超過 72 小時：自動取消預約並釋放時段，通知雙方。
+#   payment_reported（已回報匯款）永不自動取消，等老師 /paid 或 /no。
+PENDING_REMIND_SECS = 24 * 3600
+PAY_REMIND_SECS = 48 * 3600
+PAY_RELEASE_SECS = 72 * 3600
+
+
+def _booking_created_ts(ref: str) -> int | None:
+    """從 ref（user_id|毫秒時間戳）取出建立時間（秒）。舊格式回 None。"""
+    parts = ref.split("|")
+    if len(parts) < 2 or not parts[1].isdigit():
+        return None
+    return int(parts[1]) // 1000
+
+
+def _booking_label(booking: dict) -> str:
+    order_part = f"（編號 {booking['o']}）" if booking.get("o") else ""
+    return f"{format_date_label(booking.get('d', ''))} {booking.get('t', '')}{order_part}"
+
+
+def sweep_stale_bookings(now_ts: int | None = None) -> dict:
+    """掃描逾時預約：提醒老師／提醒客人／釋放時段。回傳各動作的筆數統計。"""
+    settings = get_settings()
+    now_ts = now_ts or int(time.time())
+    result = {"admin_reminded": 0, "customer_reminded": 0, "released": 0}
+
+    for entry in get_all_queue_bookings():
+        booking, ref, user_id = entry["booking"], entry["ref"], entry["user_id"]
+        status = booking.get("s", "")
+        created = _booking_created_ts(ref)
+        label = _booking_label(booking)
+
+        if status == "pending" and created and now_ts - created > PENDING_REMIND_SECS:
+            if _lock("stale_pending", ref) and settings.admin_line_user_id:
+                push_text_to_user(
+                    settings.admin_line_user_id,
+                    f"⏳ 提醒：{booking.get('n', '')} 的預約還沒確認\n{label}\n\n"
+                    f"已等待超過 24 小時，回覆 /ok 確認或 /no 婉拒。",
+                )
+                result["admin_reminded"] += 1
+            continue
+
+        if status == "awaiting_payment":
+            base = booking.get("u") or created
+            if not base:
+                continue
+            waited = now_ts - base
+            if waited > PAY_RELEASE_SECS:
+                delete_booking(ref)
+                clear_intake_state(user_id)
+                push_text_to_user(
+                    user_id,
+                    f"您的預約 {label} 因久未收到匯款回報，已自動取消，時段已釋放。\n\n"
+                    f"如仍需諮詢，歡迎輸入「我要預約」重新選擇時間 🙏",
+                )
+                if settings.admin_line_user_id:
+                    push_text_to_user(
+                        settings.admin_line_user_id,
+                        f"🕐 已自動釋放逾時未匯款的預約\n{booking.get('n', '')}｜{label}\n（已通知客人）",
+                    )
+                result["released"] += 1
+            elif waited > PAY_REMIND_SECS and _lock("pay_remind", ref):
+                push_text_to_user(
+                    user_id,
+                    f"提醒您：{label} 的預約仍在等待匯款。\n\n"
+                    f"完成匯款後請回報「已匯款」，預約才算成立；"
+                    f"若 24 小時內未收到回報，時段將自動釋放給其他客人 🙏",
+                )
+                result["customer_reminded"] += 1
+
+    return result
 
 def _month_lines(month: str) -> list:
     return [f"{format_date_label(d)} {' '.join(t.replace(':00', '') for t in times)}" for d, times in sorted(get_open_slots(month).items())]
@@ -339,4 +420,5 @@ async def cron(authorization: str = Header(default="")):
         lines = [f"{b['booking']['n']}｜{format_date_label(b['booking']['d'])} {b['booking']['t']}" for b in tomorrow_bookings]
         push_text_to_user(admin, f"明日行程：{len(lines)} 筆——\n" + "\n".join(lines))
         sent.append("tomorrow_admin")
-    return {"ok": True, "sent": sent}
+    stale = sweep_stale_bookings()
+    return {"ok": True, "sent": sent, "stale": stale}

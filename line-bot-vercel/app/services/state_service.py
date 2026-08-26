@@ -217,6 +217,7 @@ def update_booking_status(ref: str, status: str, booking: dict = None) -> bool:
             return False
 
     booking["s"] = status
+    booking["u"] = int(time.time())  # 狀態變更時間，供逾時掃描（cron）計算等待時長
     data = json.dumps(booking, ensure_ascii=False)
     return kv_cmd("SET", f"booking:{ref}", data) == "OK"
 

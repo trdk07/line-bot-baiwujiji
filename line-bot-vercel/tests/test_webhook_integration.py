@@ -574,3 +574,99 @@ def test_confirmed_card_includes_order_no(line_env):
     flat = json.dumps(line_env.raw_replies[-1].messages[0].contents.to_dict(), ensure_ascii=False)
     assert order_no in flat
     assert "預約成立" in flat
+
+
+# ============================================================
+# 逾時預約掃描（sweep_stale_bookings）
+# ============================================================
+import time as _time
+
+from app.routers.api import sweep_stale_bookings
+
+
+def _seed_stale_booking(env, user_id, status, created_secs_ago, now, updated_secs_ago=None):
+    ref = f"{user_id}|{int((now - created_secs_ago) * 1000)}"
+    booking = {"d": D1, "t": "15:00", "n": f"User-{user_id}", "s": status, "o": "B-2026-0099"}
+    if updated_secs_ago is not None:
+        booking["u"] = now - updated_secs_ago
+    env.kv.store[f"booking:{ref}"] = json.dumps(booking, ensure_ascii=False)
+    env.kv.store.setdefault("booking_queue", []).append(ref)
+    return ref
+
+
+def test_sweep_reminds_admin_for_stale_pending_once(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "pending", 25 * 3600, now)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 1, "customer_reminded": 0, "released": 0}
+    target, msgs = line_env.pushes[-1]
+    assert target == "admin1"
+    assert "還沒確認" in msgs[0]
+    assert "B-2026-0099" in msgs[0]
+
+    # 鎖住後同一次不重複提醒
+    assert sweep_stale_bookings(now)["admin_reminded"] == 0
+
+
+def test_sweep_ignores_fresh_bookings(line_env):
+    now = int(_time.time())
+    _seed_stale_booking(line_env, "cust1", "pending", 2 * 3600, now)
+    _seed_stale_booking(line_env, "cust2", "awaiting_payment", 30 * 3600, now, updated_secs_ago=3 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 0}
+    assert line_env.pushes == []
+
+
+def test_sweep_reminds_customer_awaiting_payment_after_48h(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "awaiting_payment", 60 * 3600, now, updated_secs_ago=49 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 1, "released": 0}
+    target, msgs = line_env.pushes[-1]
+    assert target == "cust1"
+    assert "仍在等待匯款" in msgs[0]
+    assert f"booking:{ref}" in line_env.kv.store  # 預約還在，只是提醒
+
+    assert sweep_stale_bookings(now)["customer_reminded"] == 0  # 只提醒一次
+
+
+def test_sweep_releases_awaiting_payment_after_72h(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "awaiting_payment", 80 * 3600, now, updated_secs_ago=73 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 1}
+    assert f"booking:{ref}" not in line_env.kv.store
+    assert line_env.kv.store.get("booking_queue", []) == []
+    targets = [t for t, _ in line_env.pushes]
+    assert "cust1" in targets and "admin1" in targets
+    customer_msg = next(m for t, m in line_env.pushes if t == "cust1")[0]
+    assert "已自動取消" in customer_msg
+
+
+def test_sweep_never_releases_payment_reported(line_env):
+    now = int(_time.time())
+    ref = _seed_stale_booking(line_env, "cust1", "payment_reported", 200 * 3600, now, updated_secs_ago=150 * 3600)
+
+    result = sweep_stale_bookings(now)
+
+    assert result == {"admin_reminded": 0, "customer_reminded": 0, "released": 0}
+    assert f"booking:{ref}" in line_env.kv.store
+
+
+def test_update_booking_status_stamps_transition_time(line_env):
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    wh.handle_text_message(_mk_event("/ok", user_id="admin1"))
+
+    booking_key = next(k for k in line_env.kv.store if k.startswith("booking:"))
+    booking = json.loads(line_env.kv.store[booking_key])
+    assert booking["s"] == "awaiting_payment"
+    assert abs(booking["u"] - _time.time()) < 60

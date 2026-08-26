@@ -43,6 +43,11 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 
 - 任一狀態下管理員可用 `/no` 婉拒（刪除預約，通知客人）
 - `/change` 可對進行中或已完成（`done`）的預約改期
+- **逾時掃描**（每日 cron `sweep_stale_bookings`，先提醒後釋放）：
+  `pending` 超過 24 小時提醒管理員處理（每 48 小時再提醒）；
+  `awaiting_payment` 超過 48 小時提醒客人匯款（一次）、超過 72 小時
+  自動取消並釋放時段（通知雙方）；`payment_reported` 永不自動取消。
+  狀態變更時間存於 booking JSON 的 `u` 欄位（epoch 秒）。
 - **軟鎖定**：`calendar_service.get_available_slots()` 會把 `pending` /
   `awaiting_payment` / `payment_reported` 狀態的預約時段也視為佔用，
   避免管理員確認收款、建立日曆事件前，該時段被其他客人重複預約

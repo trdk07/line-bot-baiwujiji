@@ -551,8 +551,30 @@
       drawChips();
     }
 
-    $("cta").onclick = () => {
+    $("cta").onclick = async () => {
       const msg = `預約 ${selectedDate} ${selectedTime}`;
+      // 送出前重新確認時段還在：客人可能在頁面停留很久，時段已被別人訂走。
+      // 驗證失敗（網路問題）就照原樣送出，後端 booking_confirm 還會再擋一次。
+      if (!mock) {
+        $("cta").disabled = true;
+        try {
+          const res = await fetch(`/api/slots?month=${monthKey(cursor)}`);
+          if (res.ok) {
+            const fresh = await res.json();
+            const stillOpen = (fresh.open[selectedDate] || []).includes(selectedTime);
+            const nowBusy = new Set(fresh.taken[selectedDate] || []).has(selectedTime);
+            payload = fresh;
+            if (!stillOpen || nowBusy) {
+              selectedTime = "";
+              drawChips();
+              render();
+              toast("這個時段剛被預約走了，請重選一個 🙏");
+              return;
+            }
+          }
+        } catch (err) { /* 交給後端擋 */ }
+        finally { $("cta").disabled = !selectedTime; }
+      }
       if (!BOT_BASIC_ID) {
         toast(`請回聊天室輸入：${msg}`);
         return;
