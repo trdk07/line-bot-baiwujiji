@@ -57,6 +57,14 @@
     td.n { font-variant-numeric: tabular-nums; }
     .booking-row { background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
     .booking-row .meta { color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .booking-row .actions { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+    .booking-row .act {
+      border: 0; border-radius: 8px;
+      background: var(--accent); color: #FFF;
+      font-size: 12px; font-weight: 700;
+      padding: 8px 12px; font-family: inherit; cursor: pointer;
+    }
+    .booking-row .act.ghost { background: transparent; border: 1px solid var(--accent); color: var(--accent); }
     .badge { font-size: 11px; border-radius: 999px; padding: 2px 9px; background: #F1EAE0; color: var(--muted); margin-left: 6px; }
     .badge.pending { background: #F6EBD3; color: #8A6A2E; }
     .badge.awaiting_payment { background: #EFE1E1; color: var(--accent); }
@@ -123,9 +131,27 @@
   </main>
   <script>
     const qs = new URLSearchParams(location.search);
-    const token = qs.get("token") || "";
+    let token = qs.get("token") || "";
     const $ = (id) => document.getElementById(id);
     const STATUS_LABEL = {pending: "⏳ 待確認", awaiting_payment: "💳 待匯款", payment_reported: "💰 已回報"};
+    const authQ = () => token ? `?token=${encodeURIComponent(token)}` : "";
+
+    // 首次由 LINE 連結（帶 token）開啟時，換成 7 天效期的 HttpOnly cookie，
+    // 並把 token 從網址列清掉——之後書籤、瀏覽紀錄裡都不會殘留 token。
+    async function ensureSession() {
+      if (!token) return;
+      try {
+        const res = await fetch("/api/admin/login", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({token}),
+        });
+        if (res.ok) {
+          token = "";
+          history.replaceState(null, "", location.pathname);
+        }
+      } catch (err) { /* 換不到 cookie 就繼續用網址 token */ }
+    }
 
     function escapeHtml(value) {
       return String(value || "").replace(/[&<>'"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
@@ -142,18 +168,13 @@
       $("statusSpin").hidden = false;
       $("statusRetry").hidden = true;
       $("statusMsg").textContent = "正在載入…";
-      if (!token) {
-        showError("缺少管理 token。請從 LINE 的管理連結開啟本頁。");
-        $("statusRetry").hidden = true;
-        return;
-      }
       try {
         const [statsRes, bookingsRes] = await Promise.all([
-          fetch(`/api/stats?token=${encodeURIComponent(token)}`),
-          fetch(`/api/bookings?token=${encodeURIComponent(token)}`),
+          fetch(`/api/stats${authQ()}`),
+          fetch(`/api/bookings${authQ()}`),
         ]);
         if (statsRes.status === 403 || bookingsRes.status === 403) {
-          showError("管理 token 不正確。");
+          showError("登入已過期或 token 不正確。請回 LINE 輸入 /admin 重新取得連結。");
           $("statusRetry").hidden = true;
           return;
         }
@@ -163,6 +184,31 @@
         $("content").hidden = false;
       } catch (err) {
         showError("連線出了點問題，請再試一次。");
+      }
+    }
+
+    // 預約操作：跟 LINE 指令 /ok /no /paid 走同一套後端邏輯
+    const ACTION_CONFIRM_TEXT = {
+      confirm: (b) => `確認 ${b.name} 的日期（${b.date} ${b.time}）？\n會立刻發匯款資訊給客人。`,
+      reject: (b) => `婉拒 ${b.name} 的預約（${b.date} ${b.time}）？\n會通知客人並刪除這筆預約。`,
+      paid: (b) => `確認已收到 ${b.name} 的款項？\n會建立行事曆、發「預約成立」通知給客人。`,
+    };
+
+    async function doAction(action, b) {
+      if (!confirm(ACTION_CONFIRM_TEXT[action](b))) return;
+      try {
+        const res = await fetch(`/api/bookings/${action}`, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({ref: b.ref, token}),
+        });
+        if (!res.ok) { alert(res.status === 404 ? "找不到這筆預約，可能已被處理，將重新整理。" : "操作失敗，請再試一次。"); await load(); return; }
+        const data = await res.json();
+        if (data.calendar && !data.calendar.ok) alert(`已完成，但行事曆建立失敗：${data.calendar.error}\n請手動新增。`);
+        else if (!data.notified) alert("已完成，但推送通知給客人失敗，請手動聯繫客人。");
+        await load();
+      } catch (err) {
+        alert("連線失敗，請再試一次。");
       }
     }
 
@@ -180,19 +226,29 @@
       $("monthRows").innerHTML = stats.months.map((m) => `
         <tr><td>${escapeHtml(m.month)}</td><td class="n">${m.new}</td><td class="n">${m.done}</td><td class="n">${m.released}</td></tr>`).join("");
 
+      const ACTIONS = {
+        pending: [["confirm", "確認日期・發匯款"], ["reject", "婉拒"]],
+        awaiting_payment: [["paid", "確認收款（未回報）"], ["reject", "婉拒"]],
+        payment_reported: [["paid", "確認收款・成立"]],
+      };
       const active = bookings.filter((b) => b.status !== "done");
-      $("bookingList").innerHTML = active.length ? active.map((b) => `
+      $("bookingList").innerHTML = active.length ? active.map((b, i) => `
         <div class="booking-row">
           <strong>${escapeHtml(b.name || "未命名")}</strong>
           <span class="badge ${escapeHtml(b.status)}">${escapeHtml(STATUS_LABEL[b.status] || b.status)}</span>
           <div class="meta">${escapeHtml(b.date)} ${escapeHtml(b.time)}</div>
+          <div class="actions">${(ACTIONS[b.status] || []).map(([act, label]) =>
+            `<button type="button" class="act${act === "reject" ? " ghost" : ""}" data-i="${i}" data-act="${act}">${label}</button>`).join("")}</div>
         </div>`).join("") : `<div class="empty">目前沒有進行中的預約</div>`;
+      $("bookingList").querySelectorAll("button.act").forEach((btn) => {
+        btn.onclick = () => doAction(btn.dataset.act, active[Number(btn.dataset.i)]);
+      });
 
-      $("calendarLink").href = `/booking.html?token=${encodeURIComponent(token)}`;
+      $("calendarLink").href = token ? `/booking.html?token=${encodeURIComponent(token)}` : "/booking.html";
     }
 
     $("statusRetry").onclick = load;
-    load();
+    ensureSession().then(load);
   </script>
 </body>
 </html>

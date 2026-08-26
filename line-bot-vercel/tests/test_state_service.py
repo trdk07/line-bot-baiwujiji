@@ -32,6 +32,8 @@ class FakeKV:
             before = len(s)
             s.add(cmd[2])
             return len(s) - before
+        if op == "EXPIRE":
+            return 1 if cmd[1] in self.store else 0
         if op == "INCR":
             val = int(self.store.get(cmd[1], 0)) + 1
             self.store[cmd[1]] = str(val)

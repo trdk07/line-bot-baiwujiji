@@ -96,6 +96,14 @@ intake 攔截的逃逸名單包含此意圖。
 | `/clear` → `/clear yes` | 清除全部進行中預約（60 秒內二次確認） |
 | `/change [編號] YYYY-MM-DD HH:MM` | 改期（進行中或已完成的預約皆可） |
 | `/admin`（或「管理後台」） | 取得管理後台總覽頁連結（`admin.html`：進行中預約、月度統計） |
+
+管理後台安全機制：`admin.html` 需帶有效 token 或 session cookie 才伺服；
+首次以 token 開啟會經 `POST /api/admin/login` 換成 7 天效期的 HttpOnly 簽章
+cookie（無狀態，金鑰由 LINE channel secret＋`ADMIN_PAGE_TOKEN` 衍生，
+換掉 `ADMIN_PAGE_TOKEN` 即全部失效），並把 token 從網址列清除。
+同一 IP 15 分鐘內驗證失敗 10 次鎖定（`authfail:{ip}`，KV 未設定時不鎖）。
+後台的「確認日期／婉拒／確認收款」按鈕與 LINE 指令 `/ok` `/no` `/paid`
+共用 `services/booking_actions.py` 的核心邏輯（雙軌等價）。
 | `/myid` | 查詢自己的 LINE User ID（非管理員也可用） |
 
 指令實作為 `webhook.py` 中的 `_cmd_*` 函式，統一透過 `ADMIN_COMMANDS`

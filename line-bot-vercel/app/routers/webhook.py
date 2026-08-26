@@ -36,8 +36,9 @@ from linebot.v3.webhooks import (
 )
 
 from app.config import get_settings
+from app.services import booking_actions
 from app.services.keyword_router import match_keyword
-from app.services.notify_service import notify_admin, notify_admin_flex, get_user_name, push_text_to_user, push_flex_to_user
+from app.services.notify_service import notify_admin, notify_admin_flex, get_user_name, push_flex_to_user
 from app.services.state_service import (
     get_message_context, set_bot_active,
     has_been_notified_bot_off, mark_notified_bot_off,
@@ -45,28 +46,23 @@ from app.services.state_service import (
     save_booking, update_booking_status, delete_booking,
     get_queue_bookings_by_status, get_all_queue_bookings,
     get_user_booking_by_status,
-    save_done_booking, get_all_done_bookings,
+    get_all_done_bookings,
     update_booking_datetime, update_done_booking_datetime,
     set_intake_pending, clear_intake_state, mark_intake_reprompted,
     set_intake_step, get_intake_step,
     save_intake_draft, get_intake_draft,
-    save_intake_data, get_intake_data, clear_intake_data,
+    save_intake_data,
     set_clear_confirm_pending, has_clear_confirm_pending, clear_confirm_pending,
-    enqueue_crm, get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
-    record_customer_visit, get_customer_profile, customer_link_sig,
-    incr_monthly_stat,
+    get_crm_queue, remove_crm_queue_item, update_crm_booking_datetime,
+    get_customer_profile, customer_link_sig,
 )
 from app.services.calendar_service import (
     get_next_available_dates,
     get_available_slots,
-    create_event,
     update_event,
     format_date_label,
 )
-from app.services.payment_qr import resolve_payment_qr_url
 from app.services.crm_service import (
-    NOTION_PREVIEW_TIMEOUT,
-    find_customer_by_line_id,
     sync_booking_to_crm,
     parse_birth_date,
 )
@@ -443,9 +439,8 @@ def _cmd_booking_ok(event, user_id, text):
 
     date_label = format_date_label(booking["d"])
 
-    # 更新狀態 → 等待匯款（傳入已有的 booking 避免重複 GET）
-    ok = update_booking_status(ref, "awaiting_payment", booking)
-    if not ok:
+    result = booking_actions.confirm_booking({"booking": booking, "ref": ref, "user_id": ctx_user})
+    if not result["ok"]:
         # KV 寫入失敗：立即告知管理員，不繼續後續流程
         reply_text(
             event,
@@ -454,19 +449,9 @@ def _cmd_booking_ok(event, user_id, text):
         )
         return
 
-    # 推送匯款 QR Code 卡片給客人
-    push_ok = push_flex_to_user(
-        ctx_user,
-        fm.payment_info_card(
-            date_label,
-            booking["t"],
-            resolve_payment_qr_url(),
-        ),
-    )
-
     push_status = (
         "匯款資訊已發送給客人，等待匯款回報。"
-        if push_ok
+        if result["notified"]
         else "⚠️ 推送給客人失敗，請手動聯繫客人告知匯款資訊。"
     )
     reply_text(
@@ -490,19 +475,9 @@ def _cmd_booking_no(event, user_id, text):
     if not ctx_user:
         return
 
-    date_label = format_date_label(booking["d"])
-
-    # 通知客人
-    push_ok = push_text_to_user(
-        ctx_user,
-        f"很抱歉，{date_label} {booking['t']} 這個時段老師無法安排。\n\n"
-        f"請輸入「我要預約」重新選擇其他時間 🙏"
-    )
-
-    push_status = "" if push_ok else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
+    result = booking_actions.reject_booking({"booking": booking, "ref": ref, "user_id": ctx_user})
+    push_status = "" if result["notified"] else "\n⚠️ 推送給客人失敗，請手動聯繫客人告知。"
     reply_text(event, f"❌ 已婉拒 {booking['n']} 的預約{push_status}")
-    delete_booking(ref)
-    clear_intake_state(ctx_user)
 
 
 def _cmd_booking_paid(event, user_id, text):
@@ -525,54 +500,13 @@ def _cmd_booking_paid(event, user_id, text):
 
     date_label = format_date_label(booking["d"])
 
-    # 建立 Google Calendar 事件
-    cal_ok, cal_error, cal_event_id = create_event(booking["d"], booking["t"], booking["n"])
+    result = booking_actions.complete_booking({"booking": booking, "ref": ref, "user_id": ctx_user})
 
-    # 取得諮詢資料（姓名、出生年月日、問題）
-    intake_name, intake_birth, intake_question = get_intake_data(ctx_user)
-    line_display_name = booking["n"]
-    crm_customer_name = intake_name or line_display_name
-    clear_intake_data(ctx_user)
-    clear_intake_state(ctx_user)
-
-    # 通知客人：預約確認卡片用 LINE 顯示名稱；諮詢資料另列生辰與問題。
-    push_ok = push_flex_to_user(
-        ctx_user,
-        fm.booking_confirmed_card(
-            line_display_name, date_label, booking["t"],
-            birth_date=intake_birth, question=intake_question,
-            order_no=booking.get("o", ""),
-        ),
-    )
-
-    # 完成後存入 done 區（供改期使用），並累積顧客檔案與月度統計
-    save_done_booking(ref, booking, cal_event_id)
-    delete_booking(ref)
-    record_customer_visit(ctx_user, line_display_name, booking["d"])
-    incr_monthly_stat("done")
-
-    if settings.notion_api_key:
-        payload = {
-            "u": ctx_user,
-            "n": crm_customer_name,
-            "b": intake_birth,
-            "q": intake_question,
-            "d": booking["d"],
-            "t": booking["t"],
-        }
-        if enqueue_crm(payload):
-            existing = find_customer_by_line_id(ctx_user, timeout=NOTION_PREVIEW_TIMEOUT)
-            if existing.failed:
-                customer_label = "（無法判定）"
-            else:
-                customer_label = "老客戶" if existing.found else "新客戶"
-            notify_admin_flex(ctx_user, fm.crm_preview_card(payload, customer_label), prefix_text="CRM 資料待確認")
-
-    if cal_ok:
+    if result["calendarOk"]:
         cal_status = "行事曆已建立 📅"
     else:
-        cal_status = f"⚠️ 行事曆建立失敗\n原因：{cal_error}\n請手動新增"
-    push_status = "" if push_ok else "\n⚠️ 推送確認卡片給客人失敗，請手動聯繫客人。"
+        cal_status = f"⚠️ 行事曆建立失敗\n原因：{result['calendarError']}\n請手動新增"
+    push_status = "" if result["notified"] else "\n⚠️ 推送確認卡片給客人失敗，請手動聯繫客人。"
     reply_text(
         event,
         f"✅ 已完成 {booking['n']} 的預約\n"

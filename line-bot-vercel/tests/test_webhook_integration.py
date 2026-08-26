@@ -60,6 +60,8 @@ class FakeKV:
             before = len(s)
             s.add(cmd[2])
             return len(s) - before
+        if op == "EXPIRE":
+            return 1 if cmd[1] in self.store else 0
         if op == "INCR":
             val = int(self.store.get(cmd[1], 0)) + 1
             self.store[cmd[1]] = str(val)
@@ -704,3 +706,79 @@ def test_admin_dashboard_command_sends_link(line_env, monkeypatch):
 
     wh.handle_text_message(_mk_event("管理後台", user_id="cust1"))
     assert line_env.replies[-1] == ["只有管理員可以使用這個指令。"]
+
+
+# ============================================================
+# 後台操作按鈕（/api/bookings/confirm、reject、paid）
+# ============================================================
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def _api(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret")
+    return TestClient(app, base_url="https://testserver")
+
+
+def _first_booking_ref(env):
+    return next(k for k in env.kv.store if k.startswith("booking:")).removeprefix("booking:")
+
+
+def test_admin_api_confirm_matches_line_ok(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    assert res.json()["notified"] is True
+    assert line_env.pushes == [("cust1", [("FLEX", "匯款資訊 — 預約日期已確認")])]
+    assert json.loads(line_env.kv.store[f"booking:{ref}"])["s"] == "awaiting_payment"
+
+    # 已不是 pending，重按一次 → 404
+    assert api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"}).status_code == 404
+
+
+def test_admin_api_paid_completes_booking(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    api.post("/api/bookings/confirm", json={"ref": ref, "token": "secret"})
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust1"))
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/paid", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    flex_alts = [a for t, msgs in line_env.pushes if t == "cust1" for kind, a in msgs if kind == "FLEX"]
+    assert any("預約成立" in a for a in flex_alts)
+    assert f"booking:{ref}" not in line_env.kv.store
+    assert f"done:{ref}" in line_env.kv.store
+    assert json.loads(line_env.kv.store["customer:cust1"])["c"] == 1
+
+
+def test_admin_api_reject_notifies_and_deletes(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    _seed_open_slots(line_env)
+    wh.handle_text_message(_mk_event(f"預約 {D1} 15:00", user_id="cust1"))
+    ref = _first_booking_ref(line_env)
+    line_env.pushes.clear()
+
+    res = api.post("/api/bookings/reject", json={"ref": ref, "token": "secret"})
+
+    assert res.status_code == 200
+    assert f"booking:{ref}" not in line_env.kv.store
+    target, msgs = line_env.pushes[-1]
+    assert target == "cust1"
+    assert "無法安排" in msgs[0]
+
+
+def test_admin_api_actions_require_auth(line_env, monkeypatch):
+    api = _api(line_env, monkeypatch)
+    res = api.post("/api/bookings/confirm", json={"ref": "x|1", "token": "wrong"})
+    assert res.status_code == 403
