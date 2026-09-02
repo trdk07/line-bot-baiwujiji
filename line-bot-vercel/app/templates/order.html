@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex">
+  <title>百無禁忌研究所｜補庫・點燈線上申請</title>
+  <style>
+    /* 色票對齊官網 fortunetell99.com（globals.css 的 @theme） */
+    :root {
+      --bg: #F5F0EB;
+      --card: #EFEBE5;
+      --sand: #C8B8A8;
+      --ochre: #C2A68C;
+      --ink: #2C2C2C;
+      --ink-sub: #4A453C;
+      --ink-dim: #6E675E;
+      --seal: #C23B3B;
+      --seal-hover: #A83232;
+      --sheet: #FAF8F4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--ink-sub);
+      font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    header {
+      background: #3D1F1F;
+      color: var(--ochre);
+      text-align: center;
+      padding: 18px 16px 14px;
+    }
+    h1, .sec-title, .type-tab { font-family: "Noto Serif TC", "Songti TC", "PMingLiU", serif; }
+    h1 { margin: 0; font-size: 20px; }
+    .subtitle { margin-top: 3px; color: var(--sand); font-size: 12px; }
+    main { max-width: 560px; margin: 0 auto; padding: 18px 16px 80px; }
+    .sec-title { color: var(--seal); font-weight: 700; font-size: 15px; margin: 20px 0 10px; }
+    .sec-title::before { content: "✦"; color: var(--ochre); font-size: 11px; margin-right: 8px; }
+
+    .type-tabs { display: flex; gap: 8px; }
+    .type-tab {
+      flex: 1;
+      border: 1px solid var(--sand);
+      border-radius: 10px;
+      background: var(--sheet);
+      color: var(--ink-dim);
+      font-size: 16px;
+      font-weight: 700;
+      padding: 12px;
+      cursor: pointer;
+    }
+    .type-tab.on { background: var(--seal); border-color: var(--seal); color: #FFF; }
+
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1.5px solid var(--sand);
+      border-radius: 12px;
+      background: var(--sheet);
+      padding: 13px 14px;
+      margin-bottom: 9px;
+      cursor: pointer;
+    }
+    .item.on { border-color: var(--seal); background: #FDFBF8; box-shadow: 0 0 0 3px rgba(194,59,59,.08); }
+    .item .rad {
+      width: 20px; height: 20px; border-radius: 50%;
+      border: 1.5px solid var(--sand); flex: none;
+      display: grid; place-items: center; color: #FFF; font-size: 11px;
+    }
+    .item.on .rad { border-color: var(--seal); background: var(--seal); }
+    .item .nm { font-weight: 700; color: var(--ink); }
+    .item .pr { margin-left: auto; color: var(--seal); font-weight: 700; white-space: nowrap; }
+
+    .qty-row {
+      display: flex; align-items: center; gap: 14px;
+      background: var(--sheet); border: 1px solid var(--sand); border-radius: 12px; padding: 12px 14px;
+    }
+    .qty-btn {
+      width: 38px; height: 38px; border-radius: 10px;
+      border: 1px solid var(--sand); background: var(--card);
+      font-size: 20px; color: var(--ink-sub); cursor: pointer;
+    }
+    .qty-btn:disabled { opacity: .35; }
+    .qty-num { font-size: 20px; font-weight: 700; color: var(--ink); min-width: 44px; text-align: center; }
+    .amount { margin-left: auto; text-align: right; }
+    .amount .v { font-size: 20px; font-weight: 700; color: var(--seal); }
+    .amount .k { font-size: 11px; color: var(--ink-dim); }
+
+    .f { display: block; margin-bottom: 14px; }
+    .f .lb { display: block; font-size: 13px; color: var(--ink-sub); margin-bottom: 5px; }
+    .f .lb i { color: var(--seal); font-style: normal; }
+    input[type=text], textarea {
+      width: 100%; border: 1px solid var(--sand); border-radius: 10px;
+      padding: 11px 12px; font-size: 16px; font-family: inherit;
+      background: var(--sheet); color: var(--ink);
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--seal); box-shadow: 0 0 0 3px rgba(194,59,59,.08); }
+    textarea { min-height: 72px; resize: vertical; }
+    .hintline { font-size: 12px; color: var(--ink-dim); margin-top: 4px; }
+    .seg { display: flex; gap: 8px; }
+    .seg .sg {
+      flex: 1; text-align: center; cursor: pointer; font-family: inherit;
+      padding: 11px 6px; font-size: 14.5px; color: var(--ink-dim);
+      border: 1px solid var(--sand); border-radius: 10px; background: var(--sheet);
+    }
+    .seg .sg.on { border-color: var(--seal); background: #FBEFEA; color: var(--seal); font-weight: 700; }
+
+    .cta {
+      width: 100%; border: 0; border-radius: 10px;
+      background: var(--seal); color: #FFF;
+      font-weight: 700; font-size: 16px; padding: 14px; margin-top: 16px;
+      font-family: inherit; cursor: pointer; letter-spacing: .05em;
+    }
+    .cta:disabled { opacity: .45; }
+    .err-box {
+      display: none; margin-top: 12px; border-radius: 10px;
+      background: #FBEFEA; color: var(--seal); padding: 11px 13px; font-size: 13.5px;
+    }
+    .foot { text-align: center; color: var(--ink-dim); font-size: 11.5px; padding: 26px 0 8px; }
+
+    .status { text-align: center; color: var(--ink-dim); padding: 64px 20px; }
+    .spin {
+      width: 30px; height: 30px;
+      border: 2.5px solid var(--sand); border-top-color: var(--seal);
+      border-radius: 50%; margin: 0 auto 14px;
+      animation: sp .8s linear infinite;
+    }
+    @keyframes sp { to { transform: rotate(360deg); } }
+    .retry {
+      margin-top: 14px; border: 0; border-radius: 8px;
+      background: var(--seal); color: #FFF; font-weight: 700;
+      padding: 10px 26px; font: inherit; cursor: pointer;
+    }
+
+    /* 完成畫面 */
+    .done-card { background: var(--sheet); border: 1px solid var(--sand); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+    .done-top { text-align: center; padding: 10px 0 4px; }
+    .done-top .big { font-size: 22px; font-weight: 700; color: var(--seal); font-family: "Noto Serif TC", serif; }
+    .done-top .no { color: var(--ink-dim); font-size: 13px; margin-top: 4px; }
+    .drow { display: flex; padding: 9px 0; border-bottom: 1px solid var(--card); font-size: 14px; gap: 12px; }
+    .drow:last-child { border-bottom: 0; }
+    .drow .k { color: var(--ink-dim); width: 64px; flex: none; font-size: 13px; }
+    .qr-img { width: 100%; border-radius: 10px; display: block; }
+    .step-note { font-size: 13px; color: var(--ink-sub); line-height: 1.9; }
+    .line-btn {
+      display: block; text-align: center; text-decoration: none;
+      background: #06C755; color: #FFF; font-weight: 700;
+      border-radius: 10px; padding: 14px; margin-top: 10px; font-size: 16px;
+    }
+    .line-btn.ghost { background: transparent; border: 1px solid #06C755; color: #06957F; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>百無禁忌研究所</h1>
+    <div class="subtitle">補庫・點燈　線上申請</div>
+  </header>
+  <main>
+    <div class="status" id="status">
+      <div class="spin" id="statusSpin"></div>
+      <div id="statusMsg">正在載入…</div>
+      <button class="retry" id="statusRetry" hidden>重新載入</button>
+    </div>
+
+    <!-- 填寫畫面 -->
+    <div id="formView" hidden>
+      <div class="type-tabs" id="typeTabs"></div>
+
+      <div class="sec-title">選擇品項</div>
+      <div id="itemList"></div>
+
+      <div class="sec-title">數量</div>
+      <div class="qty-row">
+        <button type="button" class="qty-btn" id="qtyMinus">−</button>
+        <div class="qty-num" id="qtyNum">1</div>
+        <button type="button" class="qty-btn" id="qtyPlus">＋</button>
+        <div class="amount"><div class="k">金額</div><div class="v" id="amount">NT$ 0</div></div>
+      </div>
+
+      <div class="sec-title">祈福資料</div>
+      <label class="f">
+        <span class="lb">姓名 <i>*</i></span>
+        <input type="text" id="fName" autocomplete="name" placeholder="王小明">
+      </label>
+      <div class="f">
+        <span class="lb">性別</span>
+        <div class="seg" id="sexWrap"></div>
+      </div>
+      <label class="f">
+        <span class="lb">出生年月日時（農曆） <i>*</i></span>
+        <input type="text" id="fBirth" placeholder="例：民國 79 年 5 月 15 日 辰時">
+        <span class="hintline">不確定時辰可填「吉時」</span>
+      </label>
+      <label class="f">
+        <span class="lb">住址（大略即可）</span>
+        <input type="text" id="fAddr" placeholder="例：台北市信義區">
+      </label>
+      <div id="coupleBlock" hidden>
+        <div class="f">
+          <span class="lb">祈求對象</span>
+          <div class="seg" id="modeWrap"></div>
+        </div>
+        <label class="f" id="partnerField" hidden>
+          <span class="lb">對方資料（姓名／性別／農曆生日）</span>
+          <textarea id="fPartner" placeholder="例：李小美／女／民國 80 年 3 月 3 日"></textarea>
+        </label>
+      </div>
+      <label class="f">
+        <span class="lb">想特別祈求的事（選填）</span>
+        <textarea id="fNote" placeholder="例：希望事業順利、財源廣進"></textarea>
+      </label>
+
+      <button class="cta" id="submitBtn" disabled>送出申請</button>
+      <div class="err-box" id="errBox"></div>
+      <div class="foot">送出後依指示完成付款即可，資料僅供祈福使用。</div>
+    </div>
+
+    <!-- 完成畫面 -->
+    <div id="doneView" hidden>
+      <div class="done-card done-top">
+        <div class="big">申請已送出 ✓</div>
+        <div class="no" id="dNo"></div>
+      </div>
+      <div class="done-card">
+        <div class="drow"><div class="k">品項</div><div id="dItem"></div></div>
+        <div class="drow"><div class="k">金額</div><div id="dAmount" style="color:var(--seal);font-weight:700"></div></div>
+      </div>
+
+      <div class="sec-title">付款方式（擇一）</div>
+      <div class="done-card" id="bankBlock" hidden>
+        <strong>① 銀行轉帳</strong>
+        <img class="qr-img" id="bankQr" alt="銀行轉帳 QR Code">
+      </div>
+      <div class="done-card" id="lpBlock" hidden>
+        <strong>② LINE Pay 行動支付</strong>
+        <img class="qr-img" id="lpQr" alt="LINE Pay 收款碼">
+      </div>
+
+      <div class="sec-title">最後一步</div>
+      <div class="done-card">
+        <div class="step-note" id="doneSteps"></div>
+        <a class="line-btn" id="primaryLineBtn" href="#" hidden></a>
+        <a class="line-btn ghost" id="secondaryLineBtn" href="#" hidden></a>
+      </div>
+      <div class="foot">百無禁忌研究所</div>
+    </div>
+  </main>
+  <script>
+    const BOT_BASIC_ID = __BOT_BASIC_ID__;
+    const qs = new URLSearchParams(location.search);
+    const meUid = qs.get("uid") || "";
+    const meSig = qs.get("sig") || "";
+    const $ = (id) => document.getElementById(id);
+
+    let CAT = null;
+    let curType = ["lamp", "treasury"].includes(qs.get("type")) ? qs.get("type") : "treasury";
+    let curItem = "";
+    let qty = 1;
+    let sex = "";
+    let mode = "single";
+
+    function showError(msg) {
+      $("statusSpin").hidden = true;
+      $("statusRetry").hidden = false;
+      $("statusMsg").textContent = msg;
+    }
+
+    async function load() {
+      $("status").hidden = false;
+      $("statusSpin").hidden = false;
+      $("statusRetry").hidden = true;
+      $("statusMsg").textContent = "正在載入…";
+      try {
+        const res = await fetch("/api/catalog");
+        if (!res.ok) throw new Error("load failed");
+        CAT = (await res.json()).catalog;
+        $("status").hidden = true;
+        $("formView").hidden = false;
+        renderTabs();
+        selectType(curType);
+        renderSex();
+        renderMode();
+      } catch (err) {
+        showError("連線出了點問題，請再試一次。");
+      }
+    }
+
+    function renderTabs() {
+      $("typeTabs").innerHTML = Object.entries(CAT).map(([key, c]) =>
+        `<button type="button" class="type-tab${key === curType ? " on" : ""}" data-t="${key}">${c.label}</button>`).join("");
+      $("typeTabs").querySelectorAll(".type-tab").forEach((b) => {
+        b.onclick = () => selectType(b.dataset.t);
+      });
+    }
+
+    function selectType(t) {
+      curType = t;
+      curItem = "";
+      renderTabs();
+      renderItems();
+      updateCouple();
+      updateAmount();
+    }
+
+    function renderItems() {
+      const c = CAT[curType];
+      $("itemList").innerHTML = c.items.map((it) => `
+        <div class="item${it.key === curItem ? " on" : ""}" data-k="${it.key}">
+          <div class="rad">${it.key === curItem ? "✓" : ""}</div>
+          <div class="nm">${it.label}</div>
+          <div class="pr">NT$ ${c.price.toLocaleString()}／${c.unit}</div>
+        </div>`).join("");
+      $("itemList").querySelectorAll(".item").forEach((el) => {
+        el.onclick = () => { curItem = el.dataset.k; renderItems(); updateCouple(); updateAmount(); };
+      });
+    }
+
+    function updateCouple() {
+      const it = (CAT[curType].items || []).find((i) => i.key === curItem);
+      $("coupleBlock").hidden = !(it && it.couple);
+      if (!(it && it.couple)) { mode = "single"; renderMode(); }
+    }
+
+    function renderSex() {
+      const opts = ["女", "男", "不便告知"];
+      $("sexWrap").innerHTML = opts.map((o) =>
+        `<button type="button" class="sg${o === sex ? " on" : ""}">${o}</button>`).join("");
+      $("sexWrap").querySelectorAll(".sg").forEach((b) => {
+        b.onclick = () => { sex = b.textContent; renderSex(); };
+      });
+    }
+
+    function renderMode() {
+      const opts = [["single", "為自己祈求"], ["couple", "與對方共同"]];
+      $("modeWrap").innerHTML = opts.map(([k, label]) =>
+        `<button type="button" class="sg${k === mode ? " on" : ""}" data-m="${k}">${label}</button>`).join("");
+      $("modeWrap").querySelectorAll(".sg").forEach((b) => {
+        b.onclick = () => { mode = b.dataset.m; renderMode(); $("partnerField").hidden = mode !== "couple"; };
+      });
+      $("partnerField").hidden = mode !== "couple";
+    }
+
+    function updateAmount() {
+      const c = CAT[curType];
+      $("qtyNum").textContent = qty;
+      $("qtyMinus").disabled = qty <= 1;
+      $("qtyPlus").disabled = qty >= c.maxQty;
+      $("amount").textContent = `NT$ ${(c.price * qty).toLocaleString()}`;
+      validate();
+    }
+
+    function validate() {
+      const ok = curItem && $("fName").value.trim() && $("fBirth").value.trim();
+      $("submitBtn").disabled = !ok;
+    }
+
+    $("qtyMinus").onclick = () => { if (qty > 1) { qty--; updateAmount(); } };
+    $("qtyPlus").onclick = () => { if (qty < CAT[curType].maxQty) { qty++; updateAmount(); } };
+    ["fName", "fBirth"].forEach((id) => { $(id).addEventListener("input", validate); });
+
+    $("submitBtn").onclick = async () => {
+      $("submitBtn").disabled = true;
+      $("submitBtn").textContent = "送出中…";
+      $("errBox").style.display = "none";
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({
+            type: curType,
+            item: curItem,
+            qty,
+            name: $("fName").value.trim(),
+            gender: sex,
+            birth: $("fBirth").value.trim(),
+            addr: $("fAddr").value.trim(),
+            note: $("fNote").value.trim(),
+            partner: mode === "couple" ? $("fPartner").value.trim() : "",
+            uid: meUid,
+            sig: meSig,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          $("errBox").textContent = data.detail || "送出失敗，請再試一次。";
+          $("errBox").style.display = "block";
+          return;
+        }
+        showDone(data);
+      } catch (err) {
+        $("errBox").textContent = "連線失敗，請檢查網路後再試一次。";
+        $("errBox").style.display = "block";
+      } finally {
+        $("submitBtn").disabled = false;
+        $("submitBtn").textContent = "送出申請";
+      }
+    };
+
+    function showDone(data) {
+      $("formView").hidden = true;
+      $("doneView").hidden = false;
+      window.scrollTo({top: 0});
+      $("dNo").textContent = `申請編號 ${data.orderNo}`;
+      $("dItem").textContent = data.itemText;
+      $("dAmount").textContent = `NT$ ${data.amount.toLocaleString()}`;
+      if (data.bankQr) { $("bankBlock").hidden = false; $("bankQr").src = data.bankQr; }
+      if (data.linepayQr) { $("lpBlock").hidden = false; $("lpQr").src = data.linepayQr; }
+
+      if (data.bound) {
+        $("doneSteps").innerHTML =
+          "付款資訊也已傳送到您的 LINE。<br>完成付款後，點下方按鈕回報，老師確認後申請即成立。";
+        if (data.paidUrl) {
+          $("primaryLineBtn").hidden = false;
+          $("primaryLineBtn").href = data.paidUrl;
+          $("primaryLineBtn").textContent = "我已完成付款，回 LINE 回報";
+        }
+      } else {
+        $("doneSteps").innerHTML =
+          "<b>請先點下方按鈕開啟 LINE 完成綁定</b>——綁定後才能收到成立通知、查詢進度與續期提醒。<br>完成付款後在 LINE 回報「已付款」即可。";
+        if (data.bindUrl) {
+          $("primaryLineBtn").hidden = false;
+          $("primaryLineBtn").href = data.bindUrl;
+          $("primaryLineBtn").textContent = "開啟 LINE 完成綁定";
+        }
+        if (data.paidUrl) {
+          $("secondaryLineBtn").hidden = false;
+          $("secondaryLineBtn").href = data.paidUrl;
+          $("secondaryLineBtn").textContent = "已付款？回 LINE 回報";
+        }
+      }
+    }
+
+    $("statusRetry").onclick = load;
+    load();
+  </script>
+</body>
+</html>

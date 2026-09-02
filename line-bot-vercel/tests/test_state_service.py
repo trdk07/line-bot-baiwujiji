@@ -216,8 +216,10 @@ def test_monthly_stats_accumulate_and_read_back(fake_kv):
 
     rows = ss.get_monthly_stats([month, "2000-01"])
 
-    assert rows[0] == {"month": month, "new": 2, "done": 1, "released": 0}
-    assert rows[1] == {"month": "2000-01", "new": 0, "done": 0, "released": 0}
+    assert rows[0]["month"] == month
+    assert (rows[0]["new"], rows[0]["done"], rows[0]["released"]) == (2, 1, 0)
+    assert rows[1]["month"] == "2000-01"
+    assert sum(v for k, v in rows[1].items() if k != "month") == 0
 
 
 def test_customer_roster_lists_all_sorted_by_last_visit(fake_kv):

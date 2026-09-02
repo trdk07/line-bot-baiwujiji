@@ -326,7 +326,35 @@ ORDER_STATUS_INFO = {
 }
 
 
+PRODUCT_STATUS_INFO = {
+    "awaiting_payment": ("💳", "待付款，完成後請回報「已付款」"),
+    "payment_reported": ("💰", "已回報付款，等待老師確認"),
+    "done": ("✅", "已成立"),
+}
+
+
 def _order_status_entry(booking: dict) -> dict:
+    if booking.get("ty"):
+        # 補庫／點燈訂單列（沒有日期時段，顯示品項）
+        from app.services.catalog import get_item_label, get_type
+
+        cfg = get_type(booking["ty"]) or {"label": "", "unit": ""}
+        icon, status_text = PRODUCT_STATUS_INFO.get(booking.get("s", ""), ("・", booking.get("s", "")))
+        main = f"🧾 {cfg['label']}：{get_item_label(booking['ty'], booking.get('it', ''))} ×{booking.get('q', 1)}{cfg['unit']}"
+        return {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "xs",
+            "paddingAll": "12px",
+            "backgroundColor": "#F7F3EC",
+            "cornerRadius": "8px",
+            "contents": [
+                _make_text(booking.get("no") or "（無編號）", size="xs", color=GOLD, weight="bold"),
+                _make_text(main, size="md", color=TEXT_WHITE, weight="bold"),
+                _make_text(f"{icon} {status_text}", size="sm", color=TEXT_TITLE),
+            ],
+        }
+
     d = datetime.strptime(booking["d"], "%Y-%m-%d")
     date_label = f"{d.month}/{d.day}（{WEEKDAY_NAMES[d.weekday()]}）"
     icon, status_text = ORDER_STATUS_INFO.get(booking.get("s", ""), ("・", booking.get("s", "")))
@@ -828,6 +856,146 @@ def crm_preview_card(payload: dict, customer_label: str) -> dict:
 
 
 # ============================================================
+# 補庫／點燈訂單卡片
+# ============================================================
+def order_entry_card(title: str, price_text: str, item_labels: list, url: str, note: str = "") -> dict:
+    """點燈／補庫入口卡：品項一覽＋開啟報名頁按鈕。"""
+    return {
+        "type": "flex",
+        "altText": f"{title} — 線上申請",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text(f"✦ {title}", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xxs", color=DIVIDER, align="center"),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text(price_text, size="md", color=TEXT_TITLE, weight="bold", align="center"),
+                    _sep(),
+                    *[_make_text(f"✦ {label}", color=TEXT_WHITE) for label in item_labels],
+                    *([_make_text(note, size="xs", color=TEXT_GREY)] if note else []),
+                    _ornament_divider(),
+                    {
+                        "type": "button",
+                        "action": {"type": "uri", "label": "開啟線上申請", "uri": url},
+                        "style": "primary",
+                        "color": ACCENT_RED,
+                        "height": "sm",
+                    },
+                    _make_text("填寫後依指示完成付款即可", size="xxs", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
+
+def order_payment_card(
+    order_no: str, type_label: str, item_text: str, amount: int,
+    qr_image_url: str, linepay_qr_url: str = "",
+) -> dict:
+    """訂單付款卡：金額＋雙 QR＋「已付款」回報按鈕。"""
+    qr_image_url = normalize_image_url(qr_image_url)
+    return {
+        "type": "flex",
+        "altText": f"{type_label}申請已收到 ✦ {order_no}",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {"body": {"backgroundColor": BG_DARK}},
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "paddingAll": "20px",
+                "contents": [
+                    _make_text(f"{type_label}申請已收到 ✓", size="xl", color=TEXT_TITLE, weight="bold", align="center"),
+                    _make_text(f"{item_text}", size="md", color=TEXT_WHITE, align="center"),
+                    _make_text(f"編號 {order_no}", size="xxs", color=TEXT_GREY, align="center"),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    _make_text(f"金額：NT$ {amount:,}", size="lg", color=TEXT_TITLE, weight="bold", align="center"),
+                    *_payment_qr_section(qr_image_url, linepay_qr_url),
+                    {"type": "separator", "color": DIVIDER, "margin": "lg"},
+                    _make_text(
+                        "⚠️ 付款完成後，請務必按下方「已付款」按鈕通知我們，申請才算成立。",
+                        color=TEXT_WHITE,
+                    ),
+                    _make_button("✦ 已付款", f"已付款 {order_no}"),
+                    _make_text("百無禁忌研究所", size="xs", color=TEXT_GREY, align="center"),
+                ],
+            },
+        },
+    }
+
+
+def order_confirmed_card(order: dict) -> dict:
+    """訂單成立卡（老師確認收款後發給客人）。"""
+    from app.services.catalog import get_item_label, get_type
+
+    cfg = get_type(order.get("ty", "")) or {"label": "", "unit": "", "term_days": 0}
+    item_text = f"{get_item_label(order.get('ty', ''), order.get('it', ''))} ×{order.get('q', 1)}{cfg['unit']}"
+    fields = [
+        _field("編號", order.get("no", "")),
+        _field("品項", item_text),
+        _field("祈福善信", order.get("n", "")),
+    ]
+    if order.get("pt"):
+        fields.append(_field("對方資料", order.get("pt", "")))
+    term_note = (
+        f"效期約 {cfg['term_days']} 天，圓滿前會再通知您"
+        if cfg.get("term_days") and order.get("ty") == "lamp"
+        else f"效期約一季（{cfg.get('term_days', 90)} 天），隨時想再添補都可以"
+    )
+    return {
+        "type": "flex",
+        "altText": f"{cfg['label']}已成立 ✦ {order.get('no', '')}",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "styles": {
+                "header": {"backgroundColor": BG_HEADER},
+                "body": {"backgroundColor": BG_DARK},
+            },
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "paddingAll": "16px",
+                "contents": [
+                    _make_text(f"✦  {cfg['label']} 已 成 立  ✦", size="lg", color=GOLD, weight="bold", align="center"),
+                    _make_text("百無禁忌研究所", size="xxs", color=DIVIDER, align="center"),
+                ],
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "lg",
+                "paddingAll": "24px",
+                "contents": [
+                    {"type": "box", "layout": "vertical", "spacing": "md", "contents": fields},
+                    _ornament_divider(),
+                    _make_text(term_note, size="sm", color=TEXT_GREY, align="center"),
+                    _make_text("老師會為您安排，感謝您的信任 🙏", size="sm", color=TEXT_TITLE, align="center"),
+                ],
+            },
+        },
+    }
+
+
+# ============================================================
 # 匯款資訊卡片（管理員確認日期後發送給客人）
 # ============================================================
 def normalize_image_url(url: str) -> str:
@@ -864,27 +1032,43 @@ def normalize_image_url(url: str) -> str:
     return url
 
 
-def payment_info_card(date_label: str, time_str: str, qr_image_url: str) -> dict:
+def _qr_image(url: str, ratio: str = "1:1") -> dict:
+    return {
+        "type": "image",
+        "url": url,
+        "size": QR_IMAGE_SIZE,
+        "aspectMode": "fit",
+        "aspectRatio": ratio,
+        "margin": "md",
+        "align": "center",
+    }
+
+
+def _payment_qr_section(qr_image_url: str, linepay_qr_url: str = "") -> list:
+    """付款區塊：銀行匯款 QR ＋（有設定時）LINE Pay 收款碼，兩種擇一付款。"""
+    section = []
+    if qr_image_url:
+        section += [
+            _make_text("① 銀行轉帳", size="sm", color=TEXT_TITLE, weight="bold"),
+            _qr_image(qr_image_url),
+        ]
+    if linepay_qr_url:
+        section += [
+            _sep("lg"),
+            _make_text("② LINE Pay 行動支付", size="sm", color=TEXT_TITLE, weight="bold"),
+            _qr_image(linepay_qr_url, ratio="3:4"),
+        ]
+    if section:
+        section.append(_make_text("兩種方式擇一，掃描 QR Code 完成付款", color=TEXT_GREY, align="center"))
+    else:
+        section.append(_make_text("⚠️ 付款 QR Code 暫時無法顯示，請聯繫老師取得付款資訊。", color=GOLD, align="center"))
+    return section
+
+
+def payment_info_card(date_label: str, time_str: str, qr_image_url: str, linepay_qr_url: str = "") -> dict:
     """顯示匯款 QR Code，讓客人掃碼完成匯款。"""
     qr_image_url = normalize_image_url(qr_image_url)
-    qr_section = []
-    if qr_image_url:
-        qr_section = [
-            {
-                "type": "image",
-                "url": qr_image_url,
-                "size": QR_IMAGE_SIZE,
-                "aspectMode": "fit",
-                "aspectRatio": "1:1",
-                "margin": "md",
-                "align": "center",
-            },
-            _make_text("請掃描上方 QR Code 完成匯款", color=TEXT_GREY, align="center"),
-        ]
-    else:
-        qr_section = [
-            _make_text("⚠️ 匯款 QR Code 暫時無法顯示，請聯繫老師取得匯款資訊。", color=GOLD, align="center"),
-        ]
+    qr_section = _payment_qr_section(qr_image_url, linepay_qr_url)
 
     return {
         "type": "flex",

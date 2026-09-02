@@ -48,6 +48,15 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
   `awaiting_payment` 超過 48 小時提醒客人匯款（一次）、超過 72 小時
   自動取消並釋放時段（通知雙方）；`payment_reported` 永不自動取消。
   狀態變更時間存於 booking JSON 的 `u` 欄位（epoch 秒）。
+- **補庫／點燈訂單**（`services/catalog.py`＋`services/order_service.py`，
+  與預約分開的狀態機）：品項價格固定（補庫 3,600/庫×3 種、點燈 1,800/燈×5 種，
+  效期一季），送出即 `awaiting_payment`（不經 `/ok`）→ 客人回報
+  「已付款 編號」→ `payment_reported` → 管理員 `/paid 編號`（或後台按鈕）
+  → `done`。報名頁 `order.html`（色票對齊官網 fortunetell99.com）；
+  LINE 關鍵字「點燈」「補庫」發入口卡（帶簽章 uid，送出自動綁定）；
+  官網來的訂單靠「綁定 編號」訊息綁 LINE 身分。付款卡含銀行轉帳＋
+  LINE Pay 收款碼雙 QR（`/qr-linepay.png`）。點燈完成後 90 天效期，
+  cron `sweep_lamp_renewals` 到期前 7 天推續燈提醒（一次）。
 - **軟鎖定**：`calendar_service.get_available_slots()` 會把 `pending` /
   `awaiting_payment` / `payment_reported` 狀態的預約時段也視為佔用，
   避免管理員確認收款、建立日曆事件前，該時段被其他客人重複預約
@@ -70,7 +79,12 @@ pending → awaiting_payment → payment_reported → (刪除，存入 done 區)
 | `customer:{user_id}` | 顧客累積檔案 JSON `{n,c,first,last}`（回頭客辨識） | 無（永久累積） |
 | `customer_index` | Set，所有累積過的顧客 user_id（後台顧客名冊用索引） | 無 |
 | `order_seq:{year}` | 對外訂單編號年度流水號（INCR） | 無 |
-| `stats:{YYYY-MM}:{field}` | 月度彙總（`new`/`done`/`released`，INCR，儀表板用） | 無（永久累積） |
+| `stats:{YYYY-MM}:{field}` | 月度彙總（`new`/`done`/`released`/`order_new`/`treasury_done`/`lamp_done`，INCR） | 無（永久累積） |
+| `order:{order_no}` | 補庫／點燈訂單 JSON（含取消，永久保存供對帳） | 無 |
+| `order_queue` | List，進行中訂單編號 | 無 |
+| `user_orders:{user_id}` | List，該用戶綁定過的訂單編號（進度查詢用） | 無 |
+| `lamp_active` | List，效期內點燈訂單編號（續燈提醒掃描用） | 無 |
+| `orderrate:{ip}` | 報名頁防灌單計數（每小時 10 筆） | 1 小時 |
 
 `booking` JSON 欄位：`d`=日期、`t`=時段、`n`=客戶顯示名稱、`s`=狀態
 （`pending`/`awaiting_payment`/`payment_reported`/`done`）、`o`=對外訂單編號
@@ -91,8 +105,8 @@ intake 攔截的逃逸名單包含此意圖。
 |---|---|
 | `/off` `/on` | 關閉／開啟 Bot（關閉後老師親自接管） |
 | `/ok [編號]` | 確認預約日期 → 自動發匯款資訊給客人 |
-| `/no [編號]` | 婉拒預約 → 通知客人 |
-| `/paid [編號]` | 確認收款 → 建立 Google Calendar 事件 → 完成預約 |
+| `/no [編號｜訂單編號]` | 婉拒預約／取消補庫點燈訂單 → 通知客人 |
+| `/paid [編號｜訂單編號]` | 確認收款 → 完成預約（建行事曆）或完成訂單 |
 | `/list` | 顯示所有進行中預約總覽 |
 | `/clear` → `/clear yes` | 清除全部進行中預約（60 秒內二次確認） |
 | `/change [編號] YYYY-MM-DD HH:MM` | 改期（進行中或已完成的預約皆可） |
