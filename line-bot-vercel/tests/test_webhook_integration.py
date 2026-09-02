@@ -555,7 +555,7 @@ def test_order_status_query_lists_customer_bookings(line_env):
 
 def test_order_status_query_without_bookings(line_env):
     wh.handle_text_message(_mk_event("我的預約", user_id="cust1"))
-    assert "目前沒有查得到的預約紀錄" in line_env.replies[-1][0]
+    assert "目前沒有查得到的預約或申請紀錄" in line_env.replies[-1][0]
 
 
 def test_confirmed_card_includes_order_no(line_env):
@@ -784,3 +784,174 @@ def test_admin_api_actions_require_auth(line_env, monkeypatch):
     api = _api(line_env, monkeypatch)
     res = api.post("/api/bookings/confirm", json={"ref": "x|1", "token": "wrong"})
     assert res.status_code == 403
+
+
+# ============================================================
+# 補庫／點燈訂單（④）
+# ============================================================
+from app.services import order_service
+from app.services.state_service import customer_link_sig
+
+
+def _order_api(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://booking.example.com")
+    monkeypatch.setattr(wh.settings, "bot_basic_id", "@bot")
+    return TestClient(app, base_url="https://testserver")
+
+
+def test_lamp_and_treasury_entry_cards(line_env, monkeypatch):
+    monkeypatch.setattr(wh.settings, "public_base_url", "https://booking.example.com")
+
+    wh.handle_text_message(_mk_event("點燈", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", "點燈 — 線上申請")]
+    card = json.dumps(line_env.raw_replies[-1].messages[0].contents.to_dict(), ensure_ascii=False)
+    assert "order.html?type=lamp&uid=cust1" in card
+    assert "七星燈" in card and "1,800" in card
+
+    wh.handle_text_message(_mk_event("補財庫", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", "補庫 — 線上申請")]
+
+
+def test_order_web_lifecycle_bind_pay_complete(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+
+    # 官網下單（未綁定）
+    res = api.post("/api/orders", json={
+        "type": "treasury", "item": "wealth", "qty": 2,
+        "name": "王小明", "gender": "男", "birth": "民國79年5月15日 辰時",
+        "addr": "台北市信義區", "note": "希望財源廣進",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["amount"] == 7200
+    assert data["bound"] is False
+    assert "%E7%B6%81%E5%AE%9A" in data["bindUrl"]  # urlencode(綁定)
+    no = data["orderNo"]
+    assert no.startswith("F-")
+    admin_msg = next(m for t, msgs in line_env.pushes if t == "admin1" for m in msgs)
+    assert "新補庫申請" in admin_msg and "7,200" in admin_msg
+
+    # 客人回 LINE 綁定 → 收到付款卡
+    wh.handle_text_message(_mk_event(f"綁定 {no}", user_id="cust1"))
+    assert line_env.replies[-1] == [("FLEX", f"補庫申請已收到 ✦ {no}")]
+
+    # 回報已付款（帶編號）
+    wh.handle_text_message(_mk_event(f"已付款 {no}", user_id="cust1"))
+    assert "已收到您的付款回報" in line_env.replies[-1][0]
+    assert order_service.get_order(no)["s"] == "payment_reported"
+
+    # 管理員 /paid F-xxxx → 完成
+    line_env.pushes.clear()
+    wh.handle_text_message(_mk_event(f"/paid {no}", user_id="admin1"))
+    assert "已完成訂單" in line_env.replies[-1][0]
+    assert order_service.get_order(no)["s"] == "done"
+    assert line_env.kv.store.get("order_queue", []) == []
+    flex_alts = [a for t, msgs in line_env.pushes if t == "cust1" for kind, a in msgs if kind == "FLEX"]
+    assert any("補庫已成立" in a for a in flex_alts)
+    assert json.loads(line_env.kv.store["customer:cust1"])["c"] == 1
+    month = next(k for k in line_env.kv.store if k.endswith(":treasury_done")).split(":")[1]
+    assert line_env.kv.store[f"stats:{month}:treasury_done"] == "1"
+    assert line_env.kv.store[f"stats:{month}:order_new"] == "1"
+
+
+def test_order_with_signed_uid_is_bound_and_gets_payment_card(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+
+    res = api.post("/api/orders", json={
+        "type": "lamp", "item": "wealth", "qty": 1,
+        "name": "李小美", "birth": "民國80年3月3日",
+        "uid": "cust2", "sig": customer_link_sig("cust2"),
+    })
+    assert res.json()["bound"] is True
+    no = res.json()["orderNo"]
+    assert no.startswith("L-")
+    flex_alts = [a for t, msgs in line_env.pushes if t == "cust2" for kind, a in msgs if kind == "FLEX"]
+    assert f"點燈申請已收到 ✦ {no}" in flex_alts
+
+    # 一般「已匯款」（不帶編號）也能回報訂單
+    wh.handle_text_message(_mk_event("已匯款", user_id="cust2"))
+    assert "已收到您的付款回報" in line_env.replies[-1][0]
+    assert order_service.get_order(no)["s"] == "payment_reported"
+
+
+def test_admin_no_with_order_number_cancels(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+    res = api.post("/api/orders", json={
+        "type": "treasury", "item": "noble", "qty": 1,
+        "name": "張三", "birth": "1990-01-01",
+        "uid": "cust3", "sig": customer_link_sig("cust3"),
+    })
+    no = res.json()["orderNo"]
+
+    wh.handle_text_message(_mk_event(f"/no {no}", user_id="admin1"))
+
+    assert "已取消訂單" in line_env.replies[-1][0]
+    assert order_service.get_order(no)["s"] == "cancelled"
+    assert line_env.kv.store.get("order_queue", []) == []
+    texts = [m for t, msgs in line_env.pushes if t == "cust3" for m in msgs if isinstance(m, str)]
+    assert any("已取消" in m for m in texts)
+
+
+def test_lamp_completion_sets_expiry_and_renewal_reminder(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+    res = api.post("/api/orders", json={
+        "type": "lamp", "item": "bright", "qty": 1,
+        "name": "陳四", "birth": "1985-05-05",
+        "uid": "cust4", "sig": customer_link_sig("cust4"),
+    })
+    no = res.json()["orderNo"]
+    order_service.complete_order(order_service.get_order(no))
+
+    saved = order_service.get_order(no)
+    assert saved["s"] == "done"
+    assert saved["exp"] > _time.time()
+    assert no in line_env.kv.store.get("lamp_active", [])
+
+    # 到期前 3 天：提醒一次（含老師副本），之後不重複
+    line_env.pushes.clear()
+    near = saved["exp"] - 3 * 24 * 3600
+    assert order_service.sweep_lamp_renewals(near) == {"reminded": 1, "expired": 0}
+    reminder = next(m for t, msgs in line_env.pushes if t == "cust4" for m in msgs)
+    assert "續燈提醒" in reminder and "光明燈" in reminder
+    assert order_service.sweep_lamp_renewals(near) == {"reminded": 0, "expired": 0}
+
+    # 到期後：移出效期清單
+    assert order_service.sweep_lamp_renewals(saved["exp"] + 1) == {"reminded": 0, "expired": 1}
+    assert no not in line_env.kv.store.get("lamp_active", [])
+
+
+def test_order_status_query_includes_orders(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+    res = api.post("/api/orders", json={
+        "type": "treasury", "item": "love", "qty": 1,
+        "name": "吳五", "birth": "1992-02-02", "partner": "李小美／女／民國80年3月3日",
+        "uid": "cust5", "sig": customer_link_sig("cust5"),
+    })
+    no = res.json()["orderNo"]
+
+    wh.handle_text_message(_mk_event("進度查詢", user_id="cust5"))
+
+    flat = json.dumps(line_env.raw_replies[-1].messages[0].contents.to_dict(), ensure_ascii=False)
+    assert no in flat and "姻緣庫" in flat and "待付款" in flat
+
+
+def test_admin_order_api_paid_and_invalid_input(line_env, monkeypatch):
+    api = _order_api(line_env, monkeypatch)
+    monkeypatch.setattr(wh.settings, "admin_page_token", "secret")
+
+    bad = api.post("/api/orders", json={"type": "treasury", "item": "nope", "qty": 1, "name": "x", "birth": "y"})
+    assert bad.status_code == 400
+
+    res = api.post("/api/orders", json={
+        "type": "lamp", "item": "love", "qty": 2,
+        "name": "周六", "birth": "1993-03-03",
+        "uid": "cust6", "sig": customer_link_sig("cust6"),
+    })
+    no = res.json()["orderNo"]
+
+    listed = api.get("/api/orders?token=secret").json()["orders"]
+    assert [o["no"] for o in listed] == [no]
+    done = api.post("/api/orders/paid", json={"no": no, "token": "secret"})
+    assert done.status_code == 200
+    assert order_service.get_order(no)["s"] == "done"
+    assert api.post("/api/orders/paid", json={"no": no, "token": "secret"}).status_code == 404

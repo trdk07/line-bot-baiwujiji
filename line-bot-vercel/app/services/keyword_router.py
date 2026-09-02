@@ -15,8 +15,8 @@ KEYWORD_PATTERNS = [
     (r"^/off$", "bot_off"),
     (r"^/on$", "bot_on"),
     (r"^/ok(\s+\d+)?$", "booking_ok"),
-    (r"^/no(\s+\d+)?$", "booking_no"),
-    (r"^/paid(\s+\d+)?$", "booking_paid"),
+    (r"^/no(\s+(\d+|[BFLbfl]-\d{4}-\d{4}))?$", "booking_no"),
+    (r"^/paid(\s+(\d+|[BFLbfl]-\d{4}-\d{4}))?$", "booking_paid"),
     (r"^/list$", "booking_list"),
     (r"^/clear(\s+yes)?$", "booking_clear"),
     (r"^/change\b", "booking_change"),
@@ -34,11 +34,19 @@ KEYWORD_PATTERNS = [
     (r"會晚到|晚到|晚一點", "checkin_late"),
     (r"^pass$|^不到$|^不去$|^請假$|不會到", "checkin_no"),
 
+    # --- 訂單綁定與付款回報（帶編號，放在一般匯款回報之前）---
+    (r"綁定\s*[BFLbfl]-\d{4}-\d{4}", "order_bind"),
+    (r"(已付款|已匯款|已轉帳)\s*[BFLbfl]-\d{4}-\d{4}", "order_paid_report"),
+
     # --- 匯款回報（放在預約流程前面）---
     (r"已匯款|已轉帳|匯好了|轉好了|已付款", "payment_reported"),
 
     # --- 進度查詢（放在「預約」之前，避免「我的預約」「預約查詢」被 booking 搶先匹配）---
     (r"進度|我的預約|查詢預約|預約查詢|訂單", "order_status"),
+
+    # --- 點燈／補庫入口 ---
+    (r"點燈|光明燈|七星燈|財運燈|姻緣燈|貴人燈", "lamp_entry"),
+    (r"補庫|補財庫|姻緣庫|貴人庫", "treasury_entry"),
 
     # --- 預約流程（放在 booking 前面，優先比對日期格式）---
     (r"^預約\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}$", "booking_confirm"),

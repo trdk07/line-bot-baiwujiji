@@ -15,6 +15,17 @@ from app.templates.flex_messages import normalize_image_url
 QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "static" / "qr-payment.png"
 QR_IMAGE_ROUTE = "/qr-payment.png"
 
+LINEPAY_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "static" / "qr-linepay.png"
+LINEPAY_QR_ROUTE = "/qr-linepay.png"
+
+
+def resolve_linepay_qr_url() -> str:
+    """LINE Pay 收款碼圖網址（app 自帶圖檔）；無法判定對外網址時回空字串。"""
+    base = _public_base_url()
+    if base and LINEPAY_QR_IMAGE_PATH.is_file():
+        return f"{base}{LINEPAY_QR_ROUTE}"
+    return ""
+
 
 def _public_base_url() -> str:
     """取得可對外的 https base URL。

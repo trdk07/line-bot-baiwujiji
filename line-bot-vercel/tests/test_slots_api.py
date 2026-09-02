@@ -231,3 +231,32 @@ def test_admin_pages_have_roster_and_back_link(monkeypatch):
 
     booking_html = client.get("/booking.html").text
     assert 'id="backAdmin"' in booking_html        # 管理模式的返回後台連結
+
+
+def test_api_catalog_is_public():
+    res = client.get("/api/catalog")
+
+    assert res.status_code == 200
+    cat = res.json()["catalog"]
+    assert cat["treasury"]["price"] == 3600
+    assert cat["lamp"]["price"] == 1800
+    assert len(cat["lamp"]["items"]) == 5
+    assert any(i["couple"] for i in cat["treasury"]["items"])
+
+
+def test_order_page_is_served(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "bot_basic_id", "@botid")
+
+    res = client.get("/order.html")
+
+    assert res.status_code == 200
+    assert 'id="typeTabs"' in res.text
+    assert 'const BOT_BASIC_ID = "@botid"' in res.text
+
+
+def test_linepay_qr_route_serves_png():
+    res = client.get("/qr-linepay.png")
+
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"

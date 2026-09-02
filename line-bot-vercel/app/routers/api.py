@@ -11,8 +11,12 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.services import booking_actions
-from app.services.payment_qr import QR_IMAGE_PATH, resolve_payment_qr_url, self_hosted_qr_url
+from app.services import booking_actions, order_service
+from app.services.catalog import public_catalog
+from app.services.payment_qr import (
+    LINEPAY_QR_IMAGE_PATH, QR_IMAGE_PATH,
+    resolve_linepay_qr_url, resolve_payment_qr_url, self_hosted_qr_url,
+)
 from app.services.calendar_service import TW_TZ, delete_event, format_date_label, update_event
 from app.services.notify_service import push_text_to_user, push_flex_to_user
 from app.services.slots_service import SELECTABLE_TIMES, get_open_slots, set_open_slots
@@ -227,6 +231,125 @@ async def payment_qr_image():
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@router.get("/qr-linepay.png")
+async def linepay_qr_image():
+    """伺服 LINE Pay 收款碼圖檔（app 自帶，機制同 /qr-payment.png）。"""
+    if not LINEPAY_QR_IMAGE_PATH.is_file():
+        raise HTTPException(status_code=404, detail="qr image not found")
+    return Response(
+        content=LINEPAY_QR_IMAGE_PATH.read_bytes(),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.get("/order.html", response_class=HTMLResponse)
+async def order_page():
+    settings = get_settings()
+    html = Path(__file__).resolve().parents[1].joinpath("templates", "order.html").read_text(encoding="utf-8")
+    html = html.replace("__BOT_BASIC_ID__", json.dumps(settings.bot_basic_id))
+    return HTMLResponse(html)
+
+
+@router.get("/api/catalog")
+async def catalog():
+    """補庫／點燈品項目錄（報名頁渲染用，公開）。"""
+    return {"catalog": public_catalog()}
+
+
+class OrderPayload(BaseModel):
+    type: str
+    item: str
+    qty: int = 1
+    name: str
+    gender: str = ""
+    birth: str = ""
+    addr: str = ""
+    note: str = ""
+    partner: str = ""
+    uid: str = ""
+    sig: str = ""
+
+
+@router.post("/api/orders")
+async def create_order_api(payload: OrderPayload, request: Request):
+    """建立補庫／點燈訂單（公開端點，帶簽章 uid 時自動綁定 LINE 身分）。"""
+    # 防灌單：同一 IP 每小時最多 10 筆
+    ip = _client_ip(request)
+    count = kv_cmd("INCR", f"orderrate:{ip}")
+    if count == 1:
+        kv_cmd("EXPIRE", f"orderrate:{ip}", 3600)
+    if count and int(count) > 10:
+        raise HTTPException(status_code=429, detail="too many orders")
+
+    user_id = ""
+    if payload.uid and payload.sig and hmac.compare_digest(payload.sig, customer_link_sig(payload.uid)):
+        user_id = payload.uid
+
+    try:
+        order = order_service.create_order(
+            payload.type, payload.item, payload.qty,
+            payload.name, gender=payload.gender, birth=payload.birth,
+            addr=payload.addr, note=payload.note, partner=payload.partner,
+            user_id=user_id, source="line" if user_id else "web",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    order_service.notify_order_created(order)
+
+    settings = get_settings()
+    bot_id = settings.bot_basic_id
+    from urllib.parse import quote as _quote
+    bind_q = _quote("綁定 " + order["no"])
+    paid_q = _quote("已付款 " + order["no"])
+    return {
+        "ok": True,
+        "orderNo": order["no"],
+        "amount": order["amt"],
+        "itemText": order_service.order_label(order),
+        "bound": bool(user_id),
+        "bankQr": resolve_payment_qr_url(),
+        "linepayQr": resolve_linepay_qr_url(),
+        "bindUrl": f"https://line.me/R/oaMessage/{bot_id}/?{bind_q}" if bot_id else "",
+        "paidUrl": f"https://line.me/R/oaMessage/{bot_id}/?{paid_q}" if bot_id else "",
+    }
+
+
+@router.get("/api/orders")
+async def list_orders(request: Request, token: str = ""):
+    """後台：進行中訂單清單。"""
+    _assert_admin(request, token)
+    return {"orders": order_service.list_active_orders()}
+
+
+class OrderActionPayload(BaseModel):
+    no: str
+    token: str = ""
+
+
+@router.post("/api/orders/paid")
+async def order_paid_api(payload: OrderActionPayload, request: Request):
+    """後台按鈕：確認收款，完成訂單。"""
+    _assert_admin(request, payload.token)
+    order = order_service.get_order(payload.no)
+    if not order or order.get("s") not in order_service.ORDER_ACTIVE_STATUSES:
+        raise HTTPException(status_code=404, detail="order not found")
+    result = order_service.complete_order(order)
+    return {"ok": True, "notified": result["notified"]}
+
+
+@router.post("/api/orders/cancel")
+async def order_cancel_api(payload: OrderActionPayload, request: Request):
+    """後台按鈕：取消訂單（通知客人）。"""
+    _assert_admin(request, payload.token)
+    order = order_service.get_order(payload.no)
+    if not order or order.get("s") not in order_service.ORDER_ACTIVE_STATUSES:
+        raise HTTPException(status_code=404, detail="order not found")
+    result = order_service.cancel_order(order)
+    return {"ok": True, "notified": result["notified"]}
 
 
 @router.get("/api/slots")
@@ -615,4 +738,5 @@ async def cron(authorization: str = Header(default="")):
         push_text_to_user(admin, f"明日行程：{len(lines)} 筆——\n" + "\n".join(lines))
         sent.append("tomorrow_admin")
     stale = sweep_stale_bookings()
-    return {"ok": True, "sent": sent, "stale": stale}
+    renewals = order_service.sweep_lamp_renewals()
+    return {"ok": True, "sent": sent, "stale": stale, "renewals": renewals}

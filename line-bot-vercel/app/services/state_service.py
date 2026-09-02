@@ -589,7 +589,7 @@ def customer_link_sig(user_id: str) -> str:
 # 欄位：new=新預約申請、done=完成預約（/paid）、released=逾時自動釋放。
 # done: 紀錄只留 30 天，這裡的彙總是儀表板歷史數字的永久來源。
 
-STAT_FIELDS = ["new", "done", "released"]
+STAT_FIELDS = ["new", "done", "released", "order_new", "treasury_done", "lamp_done"]
 
 
 def incr_monthly_stat(field: str):

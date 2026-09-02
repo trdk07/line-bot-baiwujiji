@@ -14,7 +14,7 @@ from app.services.crm_service import (
     find_customer_by_line_id,
 )
 from app.services.notify_service import notify_admin_flex, push_flex_to_user, push_text_to_user
-from app.services.payment_qr import resolve_payment_qr_url
+from app.services.payment_qr import resolve_linepay_qr_url, resolve_payment_qr_url
 from app.services.state_service import (
     clear_intake_data, clear_intake_state,
     delete_booking, enqueue_crm,
@@ -41,6 +41,7 @@ def confirm_booking(entry: dict) -> dict:
             format_date_label(booking["d"]),
             booking["t"],
             resolve_payment_qr_url(),
+            linepay_qr_url=resolve_linepay_qr_url(),
         ),
     )
     return {"ok": True, "notified": notified}

@@ -36,7 +36,8 @@ from linebot.v3.webhooks import (
 )
 
 from app.config import get_settings
-from app.services import booking_actions
+from app.services import booking_actions, order_service
+from app.services.catalog import CATALOG
 from app.services.keyword_router import match_keyword
 from app.services.notify_service import notify_admin, notify_admin_flex, get_user_name, push_flex_to_user
 from app.services.state_service import (
@@ -62,6 +63,7 @@ from app.services.calendar_service import (
     update_event,
     format_date_label,
 )
+from app.services.payment_qr import resolve_linepay_qr_url, resolve_payment_qr_url
 from app.services.crm_service import (
     sync_booking_to_crm,
     parse_birth_date,
@@ -292,6 +294,36 @@ def _customer_booking_url(user_id: str) -> str:
     return f"{url}?uid={quote(user_id)}&sig={customer_link_sig(user_id)}"
 
 
+def _order_page_url(user_id: str, order_type: str) -> str:
+    """帶簽章 uid 的報名頁連結（點燈／補庫），送出即自動綁定 LINE 身分。"""
+    base = settings.public_base_url.rstrip("/")
+    if not base:
+        return ""
+    return f"{base}/order.html?type={order_type}&uid={quote(user_id)}&sig={customer_link_sig(user_id)}"
+
+
+def _reply_order_entry(event, user_id: str, order_type: str):
+    """點燈／補庫入口卡片。"""
+    url = _order_page_url(user_id, order_type)
+    if not url:
+        reply_text(event, "線上申請暫時無法使用，請直接告訴老師您的需求 🙏")
+        return
+    cfg = CATALOG[order_type]
+    note = "效期約一季（90 天），到期前會提醒您續點" if order_type == "lamp" else "效期約一季（90 天），隨時想添補都可以"
+    reply_flex(event, fm.order_entry_card(
+        cfg["label"],
+        f"每{cfg['unit']} NT$ {cfg['price']:,}",
+        list(cfg["items"].values()),
+        url,
+        note=note,
+    ))
+
+
+def _extract_order_no(text: str) -> str:
+    m = re.search(r"([BFLbfl]-\d{4}-\d{4})", text)
+    return m.group(1).upper() if m else ""
+
+
 def _customer_status_line(user_id: str) -> str:
     """給管理員看的客人狀態：第一次預約或回頭客（含累積次數與上次日期）。"""
     profile = get_customer_profile(user_id)
@@ -359,18 +391,19 @@ def _reply_intake_prompt(event, date_label: str = "", time_str: str = "", prompt
 
 
 def _reply_order_status(event, user_id: str):
-    """客人查詢自己所有進行中與已成立（30 天內）預約的進度。"""
+    """客人查詢自己的預約與訂單（補庫／點燈）進度。"""
     entries = [
-        e for e in get_all_queue_bookings() + get_all_done_bookings()
+        e["booking"] for e in get_all_queue_bookings() + get_all_done_bookings()
         if e["user_id"] == user_id
     ]
-    if not entries:
+    orders = [o for o in order_service.list_user_orders(user_id) if o.get("s") != "cancelled"]
+    if not entries and not orders:
         reply_text(
             event,
-            "目前沒有查得到的預約紀錄。\n\n如需預約，請輸入「我要預約」。",
+            "目前沒有查得到的預約或申請紀錄。\n\n如需預約，請輸入「我要預約」。",
         )
         return
-    reply_flex(event, fm.order_status_card([e["booking"] for e in entries]))
+    reply_flex(event, fm.order_status_card(entries + orders))
 
 def _reply_booking_entry_or_fallback(event):
     user_id = event.source.user_id
@@ -463,7 +496,19 @@ def _cmd_booking_ok(event, user_id, text):
 
 
 def _cmd_booking_no(event, user_id, text):
-    """婉拒預約（支援 pending 與 awaiting_payment 狀態）。"""
+    """婉拒預約（支援 pending 與 awaiting_payment 狀態）。
+    帶訂單編號（/no F-2026-0012）時改為取消補庫／點燈訂單。"""
+    order_no = _extract_order_no(text)
+    if order_no:
+        order = order_service.get_order(order_no)
+        if not order or order.get("s") not in order_service.ORDER_ACTIVE_STATUSES:
+            reply_text(event, f"找不到進行中的訂單 {order_no}。")
+            return
+        result = order_service.cancel_order(order)
+        push_status = "" if result["notified"] else "\n（客人未綁定 LINE，未發送通知）"
+        reply_text(event, f"❌ 已取消訂單 {order_no}｜{order.get('n', '')}{push_status}")
+        return
+
     num = _parse_booking_number(text)
     # 先找 pending，找不到再找 awaiting_payment
     ctx_user, booking, ref = _pick_booking("pending", num, event, None)
@@ -485,7 +530,24 @@ def _cmd_booking_paid(event, user_id, text):
     確認收到款項 → 建立日曆事件 → 完成預約。
     優先處理 payment_reported（客人已主動回報），
     fallback 到 awaiting_payment（客人未回報但管理員已確認收款）。
+    帶訂單編號（/paid F-2026-0012）時改為完成補庫／點燈訂單。
     """
+    order_no = _extract_order_no(text)
+    if order_no:
+        order = order_service.get_order(order_no)
+        if not order or order.get("s") not in order_service.ORDER_ACTIVE_STATUSES:
+            reply_text(event, f"找不到進行中的訂單 {order_no}。")
+            return
+        result = order_service.complete_order(order)
+        push_status = "" if result["notified"] else "\n⚠️ 推送成立通知給客人失敗（未綁定或推送異常），請手動聯繫。"
+        reply_text(
+            event,
+            f"✅ 已完成訂單 {order_no}\n"
+            f"{order.get('n', '')}｜{order_service.order_label(order)}｜NT$ {order['amt']:,}"
+            f"{push_status}",
+        )
+        return
+
     num = _parse_booking_number(text)
     # 先找 payment_reported（正常流程）
     ctx_user, booking, ref = _pick_booking("payment_reported", num, event, None)
@@ -809,7 +871,10 @@ def handle_text_message(event: MessageEvent):
 
     # === 諮詢資料填寫攔截（優先於關鍵字比對）===
     # order_status 也放行：客人剛預約完最常想查的就是進度，不能被攔截吃掉。
-    if not is_admin(user_id) and intake_pending and intent not in {"human", "payment_reported", "order_status"}:
+    if not is_admin(user_id) and intake_pending and intent not in {
+        "human", "payment_reported", "order_status",
+        "order_bind", "order_paid_report", "lamp_entry", "treasury_entry",
+    }:
         if intent in {"intake_help"}:
             _reply_intake_prompt(event)
             return
@@ -865,6 +930,63 @@ def handle_text_message(event: MessageEvent):
             _reply_intake_prompt(event)
             return
 
+        # 訂單綁定（官網下單後回 LINE 傳「綁定 F-2026-0012」）
+        if intent == "order_bind":
+            order_no = _extract_order_no(user_text)
+            order, err = order_service.bind_order(order_no, user_id)
+            if not order:
+                reply_text(event, err)
+                return
+            if order.get("s") == "awaiting_payment":
+                reply_flex(event, fm.order_payment_card(
+                    order["no"], CATALOG[order["ty"]]["label"],
+                    order_service.order_label(order), order["amt"],
+                    resolve_payment_qr_url(),
+                    linepay_qr_url=resolve_linepay_qr_url(),
+                ))
+            else:
+                reply_text(event, f"訂單 {order['no']} 已綁定完成 ✓\n輸入「進度查詢」可隨時查看狀態。")
+            notify_admin(user_id, f"完成訂單綁定 {order['no']}", reason="訂單綁定")
+            return
+
+        # 訂單付款回報（帶編號：「已付款 F-2026-0012」）
+        if intent == "order_paid_report":
+            order_no = _extract_order_no(user_text)
+            order = order_service.get_order(order_no)
+            if not order:
+                reply_text(event, "找不到這筆訂單，請確認編號。")
+                return
+            if order.get("u") and order["u"] != user_id:
+                reply_text(event, "這筆訂單已綁定其他 LINE 帳號。")
+                return
+            if not order.get("u"):
+                order, err = order_service.bind_order(order_no, user_id)
+                if not order:
+                    reply_text(event, err)
+                    return
+            if order.get("s") == "payment_reported":
+                reply_text(event, "已收到您的付款回報，確認後會通知您，請稍候 🙏")
+                return
+            if not order_service.mark_order_paid_reported(order):
+                reply_text(event, "這筆訂單目前不在待付款狀態，如有疑問請輸入「找老師」。")
+                return
+            reply_text(event, "已收到您的付款回報 ✓\n\n確認收款後會通知您，請稍候。")
+            notify_admin(
+                user_id,
+                f"💰 訂單付款回報\n{order_service.order_label(order)}｜NT$ {order['amt']:,}\n"
+                f"編號 {order['no']}\n\n確認收款後回覆 /paid {order['no']}",
+                reason="訂單付款回報",
+            )
+            return
+
+        # 點燈／補庫入口
+        if intent == "lamp_entry":
+            _reply_order_entry(event, user_id, "lamp")
+            return
+        if intent == "treasury_entry":
+            _reply_order_entry(event, user_id, "treasury")
+            return
+
         # 進度查詢：列出該客人所有預約的目前狀態
         if intent == "order_status":
             _reply_order_status(event, user_id)
@@ -918,10 +1040,22 @@ def handle_text_message(event: MessageEvent):
                     reason="匯款回報",
                 )
             else:
-                reply_text(
-                    event,
-                    "目前沒有待匯款的預約紀錄。\n如需預約，請輸入「我要預約」。"
-                )
+                awaiting = order_service.find_user_awaiting_orders(user_id)
+                if awaiting:
+                    for order in awaiting:
+                        order_service.mark_order_paid_reported(order)
+                        notify_admin(
+                            user_id,
+                            f"💰 訂單付款回報\n{order_service.order_label(order)}｜NT$ {order['amt']:,}\n"
+                            f"編號 {order['no']}\n\n確認收款後回覆 /paid {order['no']}",
+                            reason="訂單付款回報",
+                        )
+                    reply_text(event, "已收到您的付款回報 ✓\n\n確認收款後會通知您，請稍候。")
+                else:
+                    reply_text(
+                        event,
+                        "目前沒有待匯款的預約紀錄。\n如需預約，請輸入「我要預約」。"
+                    )
             return
 
         # --- 預約流程 ---

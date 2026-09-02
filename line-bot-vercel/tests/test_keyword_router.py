@@ -124,3 +124,25 @@ def test_match_keyword_priority(text, expected_intent):
 @pytest.mark.parametrize("text", NEGATIVE_CASES)
 def test_match_keyword_negative(text):
     assert match_keyword(text) is None
+
+
+ORDER_CASES = [
+    ("點燈", "lamp_entry"),
+    ("我想點光明燈", "lamp_entry"),
+    ("財運燈", "lamp_entry"),
+    ("補庫", "treasury_entry"),
+    ("補財庫", "treasury_entry"),
+    ("姻緣庫", "treasury_entry"),
+    ("綁定 F-2026-0012", "order_bind"),
+    ("綁定L-2026-0003", "order_bind"),
+    ("已付款 F-2026-0012", "order_paid_report"),
+    ("已匯款 L-2026-0003", "order_paid_report"),
+    ("已付款", "payment_reported"),        # 沒帶編號仍走一般回報
+    ("/paid F-2026-0012", "booking_paid"),  # 管理員指令帶訂單編號
+    ("/no L-2026-0003", "booking_no"),
+]
+
+
+@pytest.mark.parametrize("text,expected_intent", ORDER_CASES)
+def test_match_keyword_orders(text, expected_intent):
+    assert match_keyword(text) == expected_intent

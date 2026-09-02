@@ -115,6 +115,9 @@
         <div class="stat"><div class="num" id="mNew">0</div><div class="lbl">新預約申請</div></div>
         <div class="stat"><div class="num" id="mDone">0</div><div class="lbl">完成預約</div></div>
         <div class="stat"><div class="num" id="mReleased">0</div><div class="lbl">逾時自動釋放</div></div>
+        <div class="stat"><div class="num" id="mOrderNew">0</div><div class="lbl">補庫／點燈申請</div></div>
+        <div class="stat"><div class="num" id="mTreasuryDone">0</div><div class="lbl">補庫成立</div></div>
+        <div class="stat"><div class="num" id="mLampDone">0</div><div class="lbl">點燈成立</div></div>
       </div>
 
       <div class="sec-title">近 6 個月</div>
@@ -125,6 +128,9 @@
 
       <div class="sec-title">進行中預約</div>
       <div id="bookingList"></div>
+
+      <div class="sec-title">進行中訂單（補庫／點燈）</div>
+      <div id="orderList"></div>
 
       <div class="sec-title">顧客名冊</div>
       <table>
@@ -176,10 +182,11 @@
       $("statusRetry").hidden = true;
       $("statusMsg").textContent = "正在載入…";
       try {
-        const [statsRes, bookingsRes, customersRes] = await Promise.all([
+        const [statsRes, bookingsRes, customersRes, ordersRes] = await Promise.all([
           fetch(`/api/stats${authQ()}`),
           fetch(`/api/bookings${authQ()}`),
           fetch(`/api/customers${authQ()}`),
+          fetch(`/api/orders${authQ()}`),
         ]);
         if (statsRes.status === 403 || bookingsRes.status === 403) {
           showError("登入已過期或 token 不正確。請回 LINE 輸入 /admin 重新取得連結。");
@@ -188,7 +195,8 @@
         }
         if (!statsRes.ok || !bookingsRes.ok) throw new Error("load failed");
         const customersData = customersRes.ok ? (await customersRes.json()).customers || [] : [];
-        render(await statsRes.json(), (await bookingsRes.json()).bookings || [], customersData);
+        const ordersData = ordersRes.ok ? (await ordersRes.json()).orders || [] : [];
+        render(await statsRes.json(), (await bookingsRes.json()).bookings || [], customersData, ordersData);
         $("status").hidden = true;
         $("content").hidden = false;
       } catch (err) {
@@ -221,16 +229,19 @@
       }
     }
 
-    function render(stats, bookings, customersData) {
+    function render(stats, bookings, customersData, ordersData) {
       $("cPending").textContent = stats.active.pending;
       $("cAwait").textContent = stats.active.awaiting_payment;
       $("cReported").textContent = stats.active.payment_reported;
       $("cDone30").textContent = stats.doneRecent;
 
-      const current = stats.months[0] || {new: 0, done: 0, released: 0};
-      $("mNew").textContent = current.new;
-      $("mDone").textContent = current.done;
-      $("mReleased").textContent = current.released;
+      const current = stats.months[0] || {};
+      $("mNew").textContent = current.new || 0;
+      $("mDone").textContent = current.done || 0;
+      $("mReleased").textContent = current.released || 0;
+      $("mOrderNew").textContent = current.order_new || 0;
+      $("mTreasuryDone").textContent = current.treasury_done || 0;
+      $("mLampDone").textContent = current.lamp_done || 0;
 
       $("monthRows").innerHTML = stats.months.map((m) => `
         <tr><td>${escapeHtml(m.month)}</td><td class="n">${m.new}</td><td class="n">${m.done}</td><td class="n">${m.released}</td></tr>`).join("");
@@ -253,11 +264,51 @@
         btn.onclick = () => doAction(btn.dataset.act, active[Number(btn.dataset.i)]);
       });
 
+      const ORDER_STATUS = {awaiting_payment: "💳 待付款", payment_reported: "💰 已回報"};
+      const ORDER_ACTIONS = {
+        awaiting_payment: [["paid", "確認收款（未回報）"], ["cancel", "取消"]],
+        payment_reported: [["paid", "確認收款・成立"], ["cancel", "取消"]],
+      };
+      $("orderList").innerHTML = ordersData.length ? ordersData.map((o, i) => `
+        <div class="booking-row">
+          <strong>${escapeHtml(o.n || "未命名")}</strong>
+          <span class="badge ${escapeHtml(o.s)}">${escapeHtml(ORDER_STATUS[o.s] || o.s)}</span>
+          <div class="meta">${escapeHtml(o.no)}｜NT$ ${(o.amt || 0).toLocaleString()}${o.u ? "" : "｜⚠️ 未綁定 LINE"}</div>
+          <div class="meta">${escapeHtml(o.b || "")}${o.addr ? "・" + escapeHtml(o.addr) : ""}${o.note ? "・" + escapeHtml(o.note) : ""}</div>
+          <div class="actions">${(ORDER_ACTIONS[o.s] || []).map(([act, label]) =>
+            `<button type="button" class="act${act === "cancel" ? " ghost" : ""}" data-i="${i}" data-act="${act}">${label}</button>`).join("")}</div>
+        </div>`).join("") : `<div class="empty">目前沒有進行中的訂單</div>`;
+      $("orderList").querySelectorAll("button.act").forEach((btn) => {
+        btn.onclick = () => doOrderAction(btn.dataset.act, ordersData[Number(btn.dataset.i)]);
+      });
+
       $("customerRows").innerHTML = customersData.length ? customersData.map((c) => `
         <tr><td>${escapeHtml(c.n || "未命名")}</td><td class="n">${c.c}</td><td class="n">${escapeHtml(c.first)}</td><td class="n">${escapeHtml(c.last)}</td></tr>`).join("")
         : `<tr><td colspan="4" class="n" style="text-align:center;color:var(--muted)">尚無累積顧客</td></tr>`;
 
       $("calendarLink").href = token ? `/booking.html?token=${encodeURIComponent(token)}` : "/booking.html";
+    }
+
+    const ORDER_CONFIRM_TEXT = {
+      paid: (o) => `確認已收到 ${o.n} 的款項（NT$ ${(o.amt || 0).toLocaleString()}）？\n會發「已成立」通知給客人。`,
+      cancel: (o) => `取消 ${o.no}（${o.n}）？\n會通知客人此筆申請已取消。`,
+    };
+
+    async function doOrderAction(action, o) {
+      if (!confirm(ORDER_CONFIRM_TEXT[action](o))) return;
+      try {
+        const res = await fetch(`/api/orders/${action}`, {
+          method: "POST",
+          headers: {"content-type": "application/json"},
+          body: JSON.stringify({no: o.no, token}),
+        });
+        if (!res.ok) { alert(res.status === 404 ? "找不到這筆訂單，可能已被處理，將重新整理。" : "操作失敗，請再試一次。"); await load(); return; }
+        const data = await res.json();
+        if (!data.notified) alert("已完成，但客人未綁定 LINE 或推送失敗，請留意是否需手動聯繫。");
+        await load();
+      } catch (err) {
+        alert("連線失敗，請再試一次。");
+      }
     }
 
     $("statusRetry").onclick = load;
